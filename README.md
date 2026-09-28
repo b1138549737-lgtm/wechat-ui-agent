@@ -244,3 +244,7 @@ autostart.ps1         # 开机自启（-Enable / -Status / -Disable）
 不做内存注入 / 反编译 / 破解，不提供或上传任何微信数据；所有数据处理都在本机完成。
 使用界面自动化可能违反微信的用户协议并导致账号受到限制，**使用风险由使用者自行承担**。
 本项目与腾讯公司无任何关联，也未获得其授权或认可；请勿将其用于批量操作、账号代挂、收费服务等场景。
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=b1138549737-lgtm/wechat-ui-agent&type=Date)](https://star-history.com/#b1138549737-lgtm/wechat-ui-agent&Date)
