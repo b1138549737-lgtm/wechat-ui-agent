@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wxbot"
+version = "0.2.0"
+description = "微信 AI 自动回复（读端走 WeFlow/MCP，发端走 MaaMCP 界面自动化）"
+requires-python = ">=3.10"          # 代码使用 X | None 语法
+dependencies = [
+  "pyyaml>=6.0,<7",
+  "mcp>=1.0,<2",
+]
+
+[project.optional-dependencies]
+send = ["maa-mcp>=1.2.3,<2", "pillow>=10.0,<13"]
+
+[project.scripts]
+wxbot = "wxbot.cli:main"
+
+[tool.setuptools]
+packages = ["wxbot"]
