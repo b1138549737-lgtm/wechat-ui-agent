@@ -23,7 +23,7 @@ QUICK = ["round18_empty_promise_crash.py", "round16_retention.py"]
 ALL = QUICK + ["round5_regressions.py", "round8_drop_matrix.py",
                "round10_watch.py", "round11_recovery.py",
                "round19_retry_pre_send.py", "round9_privacy.py",
-               "round20_fail_amplification.py"]
+               "round20_fail_amplification.py", "round21_reminder_failure_notice.py"]
 
 # 每个脚本必须满足的输出断言（"没跑用例"或"退回旧行为"都会在这里露出来）
 EXPECT = {
@@ -39,6 +39,8 @@ EXPECT = {
     "round9_privacy.py": ["✅ 符合预期"],
     # 2026-09-30：失败放大防线（连败→暂停、阈值可配、消息不丢）
     "round20_fail_amplification.py": ["✅ 符合预期"],
+    # 2026-09-30：提醒发不出去时给主人留话（评审方向 4：失败要看得见）
+    "round21_reminder_failure_notice.py": ["✅ 符合预期"],
 }
 
 

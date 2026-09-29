@@ -798,7 +798,9 @@ def summarize_history(cfg: Config, contact: dict, prior: str, msgs: list[dict],
                   "保留：聊过的话题、对方的偏好/约定/没办完的事、情绪基调。"
                   "不要记录 AI 自己的人设、风格、功能开关这类系统信息。"
                   f"只输出摘要正文，不要分点、不要客套，不超过 {max_chars} 字。")
-    user = f"旧摘要：{prior or '（无）'}\n\n新对话：\n" + "\n".join(lines)
+    # ★2026-09-29：旧摘要也过一遍净化 —— 万一它是"加固之前"生成的、里面带着伪工具标记，
+    # 不清理就会被一次次"续写"下去（第一轮评审 P0-1 说的"摘要被污染后每轮注入"）。
+    user = f"旧摘要：{clean_output(prior) or '（无）'}\n\n新对话：\n" + "\n".join(lines)
     try:
         text, _ = build_llm(cfg).generate(system, [], user)
     except LLMError:
@@ -2336,6 +2338,7 @@ async def _run_async(cfg: Config, args) -> int:
     group_members_cache: dict[str, tuple[float, list[dict]]] = {}
     cooldown_cache: dict[str, float] = {}      # 普通成员用"花钱指令"的小冷却（T380）
     send_fail_cache: dict[str, float] = {}     # "发送失败 → 回一句交代"的节流（同一会话 10 分钟一次）
+    remind_notice_cache: dict[str, float] = {}  # "提醒发不出去 → 通知主人"的节流（10 分钟一次）
     rate_hint_ts: dict[str, float] = {}        # "被限流"提示的节流（同一会话 5 分钟最多一条）
     flood_until: dict[tuple[str, str], float] = {}   # 刷屏保护的冷却截止（会话, 发言人）
     lowbrow_until: dict[tuple[str, str], float] = {}  # 低俗熔断的静默截止（会话, 发言人）
@@ -2480,6 +2483,33 @@ async def _run_async(cfg: Config, args) -> int:
             return ok, detail
         except Exception as exc:  # noqa: BLE001
             return False, f"发送失败（{type(exc).__name__}）: {exc}"
+
+    async def remind_fail_notice(why: str, rem: dict, cname: str) -> None:
+        """提醒发不出去时，给**主人**留一条看得见的说明（第一轮评审"方向 4：失败要能找得到主人"）。
+
+        为什么单独做这一条：回复失败最多是"没搭话"，而**提醒失败是砸了承诺**（"8 点叫我吃药"
+        没叫）。以前这种失败只写日志 + 面板红字，主人不看面板就永远不知道。
+        落点沿用订阅通知那条路（`bot.watch_notify`，默认文件传输助手）—— 是你自己的会话，
+        不会打扰别人。同一个落点 10 分钟最多说一次，避免"发送通路整个坏了"时连环刷屏。
+        通知本身失败就只留一行日志，绝不往外抛（不能影响主循环）。
+        """
+        tgt_key = str(cfg.get("bot.watch_notify") or "文件传输助手").strip()
+        tgt = (next((c for c in contacts
+                     if c["username"] == tgt_key or c["name"] == tgt_key), None)
+               or next((c for c in contacts if c.get("self_ok")), None))
+        if not tgt:
+            return
+        ck = f"remindfail|{tgt['username']}"
+        if time.time() - remind_notice_cache.get(ck, 0) < 600:
+            return
+        remind_notice_cache[ck] = time.time()
+        try:
+            okn, detn = await send_plain(
+                sender, tgt,
+                f"⚠️ 提醒没发出去（发给 {cname}）：{str(rem.get('text') or '')[:40]}\n原因：{str(why)[:60]}")
+            log(f"   {'✅' if okn else '❌'} [remind_fail] 已给主人留话：{str(detn)[:60]}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"   · [remind_fail] 通知主人也失败：{str(exc)[:60]}")
 
     async def limit_hint(contact: dict, reason: str, wait: float = 0.0) -> None:
         """被限流时尽力给群里一句交代（节流：同一会话 5 分钟最多一条）。
@@ -3031,6 +3061,9 @@ async def _run_async(cfg: Config, args) -> int:
                     if not c_r:
                         store.finish_reminder(rem["id"], "failed", "会话不在监听列表里")
                         log(f"⏰ 提醒 #{rem['id']} 发不出去：{rem['username']} 不在监听列表")
+                        await remind_fail_notice(
+                            "这个会话不在机器人的监听列表里（它只对白名单里的会话主动说话）",
+                            rem, str(rem["username"]))
                         continue
                     # 审查 M-2：主动发送也要守闸门。被挡下就"往后挪一点"，而不是丢掉这条提醒
                     gate_ok, gate_why = proactive_gate(cfg, store, c_r, "提醒")
@@ -3045,6 +3078,8 @@ async def _run_async(cfg: Config, args) -> int:
                         if tries > 20:
                             store.finish_reminder(rem["id"], "failed", f"被闸门挡了 {tries} 次")
                             log(f"⏰ 提醒 #{rem['id']} 放弃：{gate_why}")
+                            await remind_fail_notice(f"被主动发言闸门挡了 {tries} 次：{gate_why}",
+                                                     rem, c_r["name"])
                         else:
                             log(f"⏰ 提醒 #{rem['id']} 顺延一点再发（第 {tries} 次）：{gate_why}")
                         continue
@@ -3057,6 +3092,8 @@ async def _run_async(cfg: Config, args) -> int:
                     if okr:
                         store.note_agent(c_r["username"],
                                          f"{time.strftime('%m-%d %H:%M')} 到点提醒了对方「{rem['text']}」")
+                    else:
+                        await remind_fail_notice(str(detail_r), rem, c_r["name"])
                     log(f"⏰ {'✅' if okr else '❌'} 提醒已发（{c_r['name']}）："
                         f"{rem['text'][:30]} {detail_r}")
             # 群成员变动（T350，默认关）：欢迎新人 / 退群提醒。
