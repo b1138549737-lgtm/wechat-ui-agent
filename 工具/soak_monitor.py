@@ -216,7 +216,13 @@ def now_str() -> str:
 
 # ---------- 报告 ----------
 
-def report(root: Path) -> int:
+def report(root: Path, hours_window: float = 24.0) -> int:
+    """出长跑报告。
+
+    ★2026-09-30：默认只看**最近 24 小时**（`hours_window`；传 0/负数 = 全量）。
+    以前是把整个 jsonl（可能跨好几天、跨多次重启）一股脑统计 —— 那样算出来的"存活率/失败数"
+    跟验收口径（"跑满 24 小时"）对不上，还会把几天前的旧失败算进来。
+    """
     jl = root / "data" / "soak" / "soak.jsonl"
     if not jl.exists():
         print(f"没有采样文件：{jl}（先跑一次监控）")
@@ -232,6 +238,13 @@ def report(root: Path) -> int:
     if not rows:
         print("采样文件是空的")
         return 1
+    # ★窗口过滤（默认最近 24 小时）：至少要 2 个采样才切，否则保持全量
+    total_samples = len(rows)
+    if hours_window and hours_window > 0:
+        cutoff = rows[-1]["ts"] - hours_window * 3600
+        win = [r for r in rows if r["ts"] >= cutoff]
+        if len(win) >= 2:
+            rows = win
     first, last = rows[0], rows[-1]
     hours = (last["ts"] - first["ts"]) / 3600
     samples = len(rows)
@@ -267,7 +280,11 @@ def report(root: Path) -> int:
             runs.append([r])
 
     print("=" * 62)
+    win_note = (f"　[窗口：最近 {hours_window:g} 小时；全量共 {total_samples} 个采样]"
+                if hours_window and hours_window > 0 and total_samples != samples else "")
     print(f"长跑报告　{first.get('iso')} → {last.get('iso')}　({hours:.1f} 小时 / {samples} 个采样)")
+    if win_note:
+        print(win_note.strip())
     print("=" * 62)
     print(f"面板存活率      ：{up}/{samples} = {100.0 * up / max(1, samples):.1f}%"
           f"　（自动拉起 {restarts} 次）")
@@ -312,7 +329,39 @@ def report(root: Path) -> int:
         print(f"最近 12 小时    ：存活 {r_up}/{len(recent)}，回复 {len(r_el)} 条"
               f"，中位耗时 {r_el[len(r_el) // 2]:.1f}s")
     print("-" * 62)
-    print("判定口径：存活率 ≥99%、中位耗时 ≤10s、失败与『该回但错过了』为 0 → 达标")
+    # ★2026-09-30：给出**明确判定**（以前只打印口径，让人自己算）
+    up_ratio = up / max(1, samples)
+    med = pct(0.5) if elapsed else None
+    fails_win = (delta("fail_deliver") + delta("fail_verify")
+                 + delta("fail_llm") + delta("fail_prepare"))
+    missed_win = delta("missed_should_reply")
+    checks = [
+        ("存活率 ≥99%", up_ratio >= 0.99, f"{up_ratio * 100:.1f}%"),
+        ("回复耗时中位 ≤10s", med is not None and med <= 10.0,
+         f"{med:.1f}s" if med is not None else "无样本"),
+        ("失败 = 0（本窗口）", fails_win <= 0, str(fails_win)),
+        ("该回但错过了 = 0（本窗口）", missed_win <= 0, f"+{missed_win}"),
+    ]
+    all_ok = all(ok for _n, ok, _v in checks)
+    print(f"本次判定：{'✅ 达标' if all_ok else '❌ 未达标'}"
+          f"（口径：存活率 ≥99%、中位耗时 ≤10s、失败与『该回但错过了』为 0）")
+    for name, ok, val in checks:
+        print(f"   {'✅' if ok else '❌'} {name} —— 实测 {val}")
+    # ★2026-09-30：判定不达标时把"失败明细"列出来 —— 报告要能自解释（是已知问题的老账，还是新事故）
+    if fails_win > 0:
+        db = root / "data" / "wxbot.db"
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            print(f"   失败明细（本窗口，最近 5 条）：")
+            for ts, uname, det in con.execute(
+                    "SELECT ts, username, COALESCE(detail,'') FROM replies "
+                    "WHERE ok=0 AND ts>=? ORDER BY ts DESC LIMIT 5", (first["ts"],)):
+                when = time.strftime("%m-%d %H:%M", time.localtime(ts))
+                print(f"     · {when}  {str(uname)[:18]}  {str(det)[:78]}")
+            con.close()
+        except Exception as exc:  # noqa: BLE001
+            print(f"   （失败明细读取失败：{exc}）")
+    print("注：失败/错过的计数是「本窗口内增量」；老采样没有分类字段时按累计值算，偏保守。")
     print("内存只作观察：只看**同一进程内**的趋势（>=6 小时才有参考价值）")
     return 0
 
@@ -329,11 +378,13 @@ def main() -> int:
                     help="把启动前已有的日志也算进耗时统计（默认只统计启动后的新行）")
     ap.add_argument("--once", action="store_true", help="只采样一次（测试用）")
     ap.add_argument("--report", action="store_true", help="只出报告")
+    ap.add_argument("--hours", type=float, default=24.0,
+                    help="报告窗口小时数（默认 24 = 验收口径；0 = 全量）")
     args = ap.parse_args()
 
     root = Path(args.root) if args.root else Path(__file__).resolve().parents[1]
     if args.report:
-        return report(root)
+        return report(root, args.hours)
     log_path = Path(args.log) if args.log else root / "data" / "web.log"
     soak_dir = root / "data" / "soak"
     soak_dir.mkdir(parents=True, exist_ok=True)
