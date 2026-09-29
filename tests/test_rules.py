@@ -257,6 +257,16 @@ def main():
           clean_output("<result><name>web_search</name><arguments>{}</arguments></result>"), "")
     check("tool_call 块 → 空",
           clean_output('<tool_call>{"name": "web_search"}</tool_call>'), "")
+    # ★2026-09-27 工单第 9 条要求补的单测（2026-09-29 补齐）：**未闭合**的伪标签
+    #   只剥标签会漏出一整段 JSON（"name"/"arguments" 全在），必须连 JSON 体一起剥。
+    check("tool_call 未闭合（只有开始标签）→ 连 JSON 体一起剥",
+          clean_output('<tool_call>{"name": "web_search", "arguments": {"query": "x"}}'), "")
+    check("未闭合 + 前面有正文 → 只留正文",
+          clean_output('前半句 <tool_call>{"name":"x","arguments":{}}'), "前半句")
+    check("未闭合 + 后面有正文 → JSON 剥掉、后面的话留下",
+          clean_output('<tool_call>{"name": "x", "arguments": {}}\n后面的话'), "后面的话")
+    check("已闭合 + 后面有正文 → 也留",
+          clean_output('<tool_call>\n{"name": "x"}\n</tool_call>\n后面的话'), "后面的话")
     check("函数式 → 剥掉，正文留下",
           clean_output('好的 remember({"fact": "不吃香菜"}) 就这样'), "好的 就这样")
     check("正文+伪块+正文 → 两段都留",
