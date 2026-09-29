@@ -70,6 +70,22 @@ def _categories(text: str) -> set[str]:
     return {cat for cat, words in CATEGORY_WORDS.items() if any(w in low for w in words)}
 
 
+# ★2026-09-29（第一轮评审 P1-2②"改口不落库"的收尾）：换说法 + 意思反过来时，
+#   2-gram Jaccard 只有 0.2 左右（"不喜欢吃香菜" vs "我其实超爱吃香菜"），归并规则抓不住。
+#   这里补一条"同话题反义"判据：新旧共享 ≥2 个**非通用** 2-gram + 话题类别相同 +
+#   一边带否定、另一边不带 → 视为改口，用新说法覆盖旧条。
+NEG_WORDS = ("不", "别", "没", "无", "讨厌", "戒", "禁")
+GENERIC_BIGRAMS = frozenset({
+    "喜欢", "欢吃", "爱吃", "不吃", "不喜", "不是", "我是", "我的", "他的", "她的",
+    "一个", "什么", "可以", "现在", "以后", "其实", "真的", "觉得",
+})
+
+
+def _has_negation(text: str) -> bool:
+    t = str(text or "")
+    return any(w in t for w in NEG_WORDS)
+
+
 SCHEMA_TABLES = """
 CREATE TABLE IF NOT EXISTS messages (
   key TEXT PRIMARY KEY,          -- 会话+消息id，去重键
@@ -445,6 +461,27 @@ class Store:
                         (1 if ok else 0, (base + tail)[:1000], int(rid)))
         self.db.commit()
 
+    def unnotified_unverified(self, limit: int = 5) -> list[dict]:
+        """核对没确认送达、且还没提醒过主人的回复（2026-09-30 评审方向 4 补）。
+
+        真机事故：一条回给主人的消息"点了发送"，但读端至今没回读 → 按"不重发"策略就此沉默：
+        用户可能根本没收到，而没人知道。这里把这类行捞出来交给主循环通知主人。
+        """
+        cur = self.db.execute(
+            "SELECT id, username, reply FROM replies"
+            " WHERE ok=0 AND detail LIKE '%未在记录里确认%' AND detail NOT LIKE '%已提醒主人%'"
+            " ORDER BY ts ASC LIMIT ?", (max(1, int(limit)),))
+        cols = ["id", "username", "reply"]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def mark_replies_notified(self, ids: list[int]) -> None:
+        """给这些 reply 打上"已提醒主人"标记（detail 追加，用于去重）。"""
+        for rid in ids or []:
+            self.db.execute(
+                "UPDATE replies SET detail=COALESCE(detail,'')||'｜已提醒主人' WHERE id=?",
+                (int(rid),))
+        self.db.commit()
+
     def reply_sources_since(self, since: float) -> dict[str, int]:
         """按来源统计（给 /状态 和面板用）：{'run': 80, 'web': 6, 'command': 20…}。"""
         cur = self.db.execute(
@@ -541,13 +578,24 @@ class Store:
         # ★2026-09-27 审查 P1-2①：同一件事被反复说，措辞略变就各存一条（实测年会那件事存了 5 份），
         # 会白占 max_memory 名额。现在**近似归并**：2-gram Jaccard ≥ 0.6 视为同一件事 →
         # 用最新说法覆盖正文（"改成 X"这种更正因此也能落库）+ 权重 +0.5（封顶 3.0）。
+        # ★2026-09-29：再加一条"**改口**"判据（见 NEG_WORDS/GENERIC_BIGRAMS）——
+        # 换说法又反过来（"不喜欢吃香菜"→"我其实超爱吃香菜"）Jaccard 只有 0.2，得单独认。
         if len(skel(fact)) >= 4:
             best: tuple[float, int, float] | None = None
+            new_bg = _bigrams(fact)
+            new_cats = _categories(fact)
+            new_neg = _has_negation(fact)
             for mid, old_fact, old_w in self.db.execute(
                     "SELECT id, fact, weight FROM memories WHERE username=? AND speaker=?",
                     (username, speaker)).fetchall():
-                sim = _jaccard(_bigrams(old_fact), _bigrams(fact))
-                if sim >= 0.6 and (best is None or sim > best[0]):
+                old_bg = _bigrams(old_fact)
+                sim = _jaccard(old_bg, new_bg)
+                flip = bool(
+                    new_cats and (new_cats & _categories(old_fact))
+                    and _has_negation(old_fact) != new_neg
+                    and len((old_bg & new_bg) - GENERIC_BIGRAMS) >= 2
+                )
+                if (sim >= 0.6 or flip) and (best is None or sim > best[0]):
                     best = (sim, int(mid), float(old_w or 1.0))
             if best:
                 new_w = min(3.0, max(best[2], float(weight or 1.0)) + 0.5)

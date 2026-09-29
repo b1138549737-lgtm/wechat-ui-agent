@@ -2339,6 +2339,7 @@ async def _run_async(cfg: Config, args) -> int:
     cooldown_cache: dict[str, float] = {}      # 普通成员用"花钱指令"的小冷却（T380）
     send_fail_cache: dict[str, float] = {}     # "发送失败 → 回一句交代"的节流（同一会话 10 分钟一次）
     remind_notice_cache: dict[str, float] = {}  # "提醒发不出去 → 通知主人"的节流（10 分钟一次）
+    verify_notice_ts: dict[str, float] = {}     # "回复没确认送达 → 通知主人"的节流（10 分钟一次）
     rate_hint_ts: dict[str, float] = {}        # "被限流"提示的节流（同一会话 5 分钟最多一条）
     flood_until: dict[tuple[str, str], float] = {}   # 刷屏保护的冷却截止（会话, 发言人）
     lowbrow_until: dict[tuple[str, str], float] = {}  # 低俗熔断的静默截止（会话, 发言人）
@@ -3224,6 +3225,31 @@ async def _run_async(cfg: Config, args) -> int:
                     await handle(contact, row_to_msg({**row,
                                                       "raw_id": row["key"].split("|", 1)[-1]}),
                                  db_key=row["key"])
+
+            # 0b) 核对没确认送达的回复 → 给主人留话（2026-09-30 真机事故：一条回给主人的消息
+            #     "点了发送"但读端一直没回读，按「不重发」策略就此沉默 —— 用户可能根本没收到，
+            #     而没人知道。评审方向 4：失败要能找得到主人。1 条 / 10 分钟封顶。）
+            if not RT.paused:
+                pend = store.unnotified_unverified(limit=5)
+                if pend and time.time() - verify_notice_ts.get("t", 0.0) > 600:
+                    tgt_key = str(cfg.get("bot.watch_notify") or "文件传输助手").strip()
+                    tgt_v = (next((c for c in contacts
+                                   if c["username"] == tgt_key or c["name"] == tgt_key), None)
+                             or next((c for c in contacts if c.get("self_ok")), None))
+                    if tgt_v:
+                        verify_notice_ts["t"] = time.time()
+                        cname_v = next((c["name"] for c in contacts
+                                        if c["username"] == pend[0]["username"]),
+                                       str(pend[0]["username"]))
+                        more = f"（另有 {len(pend) - 1} 条）" if len(pend) > 1 else ""
+                        okv, detv = await send_plain(
+                            sender, tgt_v,
+                            f"⚠️ 有 {len(pend)} 条回复没确认送达{more}：给「{cname_v}」的"
+                            f"「{str(pend[0]['reply'] or '')[:50]}」\n"
+                            f"（点了发送但读端没回读，按「不重发」策略没再发 —— 你去那边看下收到没有）")
+                        log(f"   {'✅' if okv else '❌'} [verify_notice] 已给主人留话"
+                            f"（{len(pend)} 条未确认送达）：{str(detv)[:50]}")
+                    store.mark_replies_notified([r["id"] for r in pend])
 
             # 1) SSE 实时路径
             events = []
