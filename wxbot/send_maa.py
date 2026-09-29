@@ -55,6 +55,32 @@ def punct_norm(text: str) -> str:
     return str(text or "").translate(_PUNCT_TABLE)
 
 
+# ★2026-09-29 真机（新群「AAA🐮💰😎🦔🐱☝🏼」）：群名全是 emoji，OCR 认不准也认不全 →
+#   全等判据永远不命中 → 这个群**发不出去**（日志："面板里没有…这一行 —— 拒绝发送"）。
+#   补一条**骨架比对**：把名字里的 emoji/符号去掉，只比"文字+数字"骨架（AAA）。
+#   只在"名字本身含符号"时启用（普通名字仍走全等），且要求**唯一命中**才认。
+_SKEL_STRIP_RE = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def name_skel(text: str) -> str:
+    """名字的"文字骨架"：去掉 emoji/空格/标点，只留汉字/字母/数字；顺带抹掉群名人数后缀 (8)。"""
+    t = re.sub(r"[（(]\d+[)）]\s*$", "", str(text or ""))
+    return _SKEL_STRIP_RE.sub("", t)
+
+
+def skel_accepts(names: set[str]) -> set[str]:
+    """哪些骨架可以用来匹配：只收**含符号的名字**（骨架≠原名）且骨架 ≥2 字符。
+
+    例：'AAA🐮💰😎🦔🐱☝🏼' → 'AAA' ✓；'示例一号训练营' → 骨架==原名 → 不收（普通名字仍全等）。
+    """
+    out = set()
+    for n in names:
+        s = name_skel(n)
+        if len(s) >= 2 and s != n:
+            out.add(s)
+    return out
+
+
 # 输入框为空时会显示的占位/工具栏文字，回读时要排除
 INPUT_PLACEHOLDERS = ("按住鼠标", "语音输入文字", "输入文字", "发送", "表情", "文件", "截图", "剪切")
 
@@ -531,8 +557,10 @@ class MaaSender:
         heads = self._title_texts(items)
         names = self._accept_names(contact_name)
         names_p = {punct_norm(n) for n in names}          # 标点归一（2026-09-28）
+        skels = skel_accepts(names)                       # ★emoji 名字的骨架（2026-09-29）
         full_hit = bool(names) and any(
             t in names or punct_norm(t) in names_p
+            or (skels and name_skel(t) in skels)
             or any(t.startswith(n + "(") or t.startswith(n + "（") for n in names)
             for t in heads)
         prefix_hit = bool(short) and any(t.startswith(short) for t in heads)
@@ -600,6 +628,7 @@ class MaaSender:
             return []
         names = self._accept_names(contact_name)
         names_p = {punct_norm(n) for n in names}          # 标点归一版（全角/半角问号等）
+        skels = skel_accepts(names)                       # ★含符号名字的"文字骨架"（emoji 兜底）
         key = norm(contact_name)
         key_p = punct_norm(key)
         # 窗口宽度决定左侧列表占多宽：宽布局里列表文字贴着窗口左缘（实测 ~9–15%）；
@@ -607,7 +636,7 @@ class MaaSender:
         # 而且"搜索"两个字被收成放大镜图标、名字被截断（2026-09-26 真机踩到，见 _truncated_row）。
         narrow = w < 1000
         x_limit = w * 0.50 if narrow else w * 0.20
-        rows, trunc = [], []
+        rows, trunc, skel_rows = [], [], []
         for it in items:
             x, y = it["box"][0], it["box"][1]
             t = norm(it["text"])
@@ -622,12 +651,20 @@ class MaaSender:
                     and len(t) <= len(key) + 2)):
                 rows.append(it)
                 continue
+            # ★emoji 名字兜底（2026-09-29）：OCR 认不全 emoji 时比"文字骨架"，
+            #   但必须**唯一命中**才认（两行同骨架 = 可能点错群 → 拒）。
+            if skels and x < x_limit and name_skel(t) in skels:
+                skel_rows.append(it)
+                continue
             # 截断兜底：命中条件苛刻（严格前缀且唯一），不会滥点
             if self.verify_full_name and x < x_limit and self._truncated_row(t, names):
                 trunc.append(it)
         if rows:
             self._row_match_kind = "exact"
             return sorted(rows, key=lambda it: it["box"][1])
+        if len(skel_rows) == 1:
+            self._row_match_kind = "skeleton"
+            return skel_rows
         if len(trunc) == 1:                  # 多行同前缀 → 不猜，交给搜索兜底/报错
             self._row_match_kind = "truncated"
             return trunc
@@ -822,7 +859,18 @@ class MaaSender:
         # 没有精确命中才退回"从头匹配"，且候选必须唯一，否则拒绝。
         # 精确命中认"这个人的所有叫法"（备注/昵称/显示名/微信号），见 _accept_names。
         accept = self._accept_names(contact_name)
+        skels = skel_accepts(accept)                      # ★emoji 名字的骨架兜底（2026-09-29）
         exact = [it for it in rows_all if norm(it["text"]) in accept]
+        if not exact and skels:
+            # OCR 认不全 emoji 时用骨架比；**同一骨架下必须只有一种原文**（同一个会话会在
+            # 面板不同分区各出一行，原文相同），否则可能点错群 → 直接拒绝。
+            by_skel = [it for it in rows_all if name_skel(norm(it["text"])) in skels]
+            raws = {norm(it["text"]) for it in by_skel}
+            if len(raws) == 1:
+                exact = by_skel
+            elif raws:
+                return False, (f"面板里有 {len(raws)} 个名字骨架相同（{sorted(raws)[:3]}），"
+                               f"拒绝发送")
         prefix = [it for it in rows_all
                   if full and (norm(it["text"]).startswith(full + "(")
                                or norm(it["text"]).startswith(full + "（"))]

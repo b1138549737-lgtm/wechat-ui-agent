@@ -231,6 +231,18 @@ def main():
     check("窄窗口：右侧聊天标题不会被当成列表行",
           s3._list_rows(title_like, "示例一号训练营") == [])
 
+    print("[emoji 群名（2026-09-29 真机）：OCR 认不全也要能匹配，但必须唯一]")
+    EMOJI = "AAA🐮💰😎🦔🐱☝🏼"
+    check("emoji 群名：OCR 只认出一半 → 按文字骨架命中",
+          len(s3._list_rows(win_items([("AAA🐮💰", [120, 250, 150, 26])]), EMOJI)) == 1)
+    check("emoji 群名：两行同骨架 → 不猜（拒绝发送）",
+          s3._list_rows(win_items([("AAA🐮", [120, 250, 150, 26]),
+                                   ("AAA🐱", [120, 300, 150, 26])]), EMOJI) == [])
+    check("emoji 群名：标题条带（可能带人数后缀）也认",
+          s3._title_check(band(EMOJI + "(8)"), EMOJI)[0] is True)
+    check("普通名字不受影响（骨架集合为空 → 仍然要求全等）",
+          s3._list_rows(win_items([("ABC", [120, 250, 90, 26])]), "ABC群") == [])
+
     too_short = win_items([("示例机…", [120, 250, 90, 26])], w=1400, h=1000)
     check("配置名和目标名只差一个字时，截断行不会当成它（前缀方向依然拦）",
           s3._list_rows(too_short, "示例机") == [])
