@@ -1595,12 +1595,43 @@ def check_contact_names(cfg: Config, resolver) -> list[str]:
         except Exception as exc:  # noqa: BLE001
             problems.append(f"体检『{name}』失败（读端不可用）: {str(exc)[:60]}")
             continue
-        shown = [str(f.get("displayName") or f.get("name") or "") for f in found]
-        if name not in shown:
+        # ★2026-09-29：比较要过**标点归一化** —— 读端给的名字可能用全角标点
+        # （真机：「这是什么?」在 WeFlow 里是「这是什么？」），B1 发送校验那边
+        # 早就用 punct_norm 处理了同一件事，体检这里以前没跟。
+        from .send_maa import punct_norm as _pn
+        shown = [_pn(str(f.get("displayName") or f.get("name") or "")) for f in found]
+        if _pn(name) not in shown:
             problems.append(
                 f"『{name}』在微信里没有完全同名的会话（读到 {shown[:3]}）→ "
                 f"请把 contacts 里的 name 改成微信显示的完整名字，否则发送会被安全校验拒绝")
     return problems
+
+
+def session_name_resolver(sources):
+    """会话名体检用的解析器：**先查好友表，查不到再查会话列表**。
+
+    ★2026-09-29 真机：非好友会话（例如「这是什么?」）不在好友表里，只走 `find_contacts`
+    会报「没有完全同名的会话」—— 其实它在**会话列表**里好好的（新好友、群、公众号都在那儿），
+    doctor 白报警、还可能让人去改一个本来正确的名字。
+    """
+
+    def _resolve(name: str) -> list[dict]:
+        got = sources.find_contacts(name)
+        if got:
+            return got
+        from .send_maa import punct_norm as _pn
+        try:
+            sess = sources.sessions(limit=60) or []
+        except Exception:  # noqa: BLE001
+            return []
+        out = []
+        for s in sess:
+            shown = str(s.get("displayName") or s.get("name") or "")
+            if _pn(shown) == _pn(name):
+                out.append({"displayName": shown, "username": s.get("username")})
+        return out
+
+    return _resolve
 
 
 def risk_audit(cfg: Config) -> list[str]:
@@ -1802,7 +1833,8 @@ def cmd_doctor(args):
         except Exception as exc:  # noqa: BLE001
             log(f"⚠️ 取群「{g['name']}」成员失败: {str(exc)[:80]}")
     # 第三轮审查建议：**会话名体检**（逻辑在 check_contact_names，可离线单测）
-    name_problems = check_contact_names(cfg, sources.find_contacts)
+    # ★2026-09-29：解析器改成"先好友表、再会话列表" —— 非好友会话（新好友/公众号）不在好友表里
+    name_problems = check_contact_names(cfg, session_name_resolver(sources))
     for p in name_problems:
         ok_all = False
         log(f"❌ 会话名体检：{p}")

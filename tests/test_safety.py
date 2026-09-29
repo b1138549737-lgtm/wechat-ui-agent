@@ -48,6 +48,23 @@ def main():
     check("本地档（ollama）不提示这条（免得正常配置天天刷）",
           not any("不会自己调工具" in h for h in localactive.hints()))
 
+    print("[会话名体检：非好友会话要在会话列表里找到（2026-09-29 真机误报）]")
+    from wxbot.cli import session_name_resolver  # noqa: PLC0415
+
+    class _FakeSources:
+        def find_contacts(self, keyword, limit=10):
+            return []                                   # 非好友：好友表里没有
+
+        def sessions(self, limit=60):
+            # 夹具用合成名字/合成群 id：真机那些名字不进公开仓库（脱敏扫描会拦下来）
+            return [{"displayName": "某人（非好友）", "username": "wxid_x"},
+                    {"displayName": "示例新群", "username": "10000000003@chatroom"}]
+
+    _res = session_name_resolver(_FakeSources())
+    check("非好友在会话列表里 → 能找到（体检不再误报）",
+          _res("某人（非好友）") == [{"displayName": "某人（非好友）", "username": "wxid_x"}])
+    check("会话列表里也没有 → 找不到（该报的问题照样报）", _res("不存在的会话") == [])
+
     print("[风控体检（2026-09-28 评审：账号行为形态四条）]")
     from wxbot.cli import risk_audit  # noqa: PLC0415
     c = base()
