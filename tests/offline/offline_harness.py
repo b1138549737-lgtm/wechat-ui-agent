@@ -165,7 +165,10 @@ class FakeSources:
                     out[-1]["media_path"] = spec
             if not str(username).endswith("@chatroom"):
                 out[-1]["is_group"] = False
-        session_name = {GID: GROUP, GID2: GROUP2, "wxid_a": "示例群友"}.get(username, username)
+        # ★2026-09-30：补上文件传输助手（"filehelper" → 显示名"文件传输助手"）——
+        # 少了这条映射，发给它的消息在假读端里永远"回读不到"，送达核对必然失败（round23 实测）。
+        session_name = {GID: GROUP, GID2: GROUP2, "wxid_a": "示例群友",
+                        "filehelper": "文件传输助手"}.get(username, username)
         echo = [s for s in self.sender.sent if s.get("session") in (None, session_name, username)]
         for j, s in enumerate(echo):
             out.append({"username": username, "content": s["text"], "raw_content": s["text"],

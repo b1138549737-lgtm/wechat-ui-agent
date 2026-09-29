@@ -9,7 +9,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from wxbot.rules import (defer_seconds_for, format_at_prefix,  # noqa: E402
-                         is_limit_reason, should_reply)
+                         is_limit_reason, norm_ws, should_reply)
 from wxbot.store import Store  # noqa: E402
 
 PASS, FAIL = [], []
@@ -97,6 +97,19 @@ def main():
           should_reply(s4, u, "张三", "我刚说的话", True, rule("always"))[0], False)
     check("自聊会话里自己发的也算收到 → 回",
           should_reply(s4, u, "文件传输助手", "发给自己", True, rule("always"), is_self_chat=True)[0], True)
+    # ★2026-09-30 真机事故：机器人把给主人发的"⚠️ 有 3 条回复没确认送达…"当成新消息回了自己一句。
+    # 这类"代码生成 + send_plain 发送"的通知不进 replies 表，只能靠 own_sent 骨架指纹认出来。
+    s4b = fresh_store()
+    notice = ("⚠️ 有 3 条回复没确认送达（另有 2 条）：给「示例群C」的「「我需要要这些吗」——不需要喵」\n"
+              "（点了发送但读端没回读，按「不重发」策略没再发 —— 你去那边看下收到没有）")
+    s4b.record_own_sent(u, norm_ws(notice), len(notice))
+    ok_n, why_n = should_reply(s4b, u, "文件传输助手", notice, False, rule("always"),
+                               is_self_chat=True)
+    check("自己发的通知读回来 → 不回", ok_n, False)
+    check("（原因含防自回环）", "防自回环" in why_n, True)
+    check("别的内容不受影响（不是自己的）",
+          should_reply(s4b, u, "文件传输助手", "这是一条全新的消息", False, rule("always"),
+                       is_self_chat=True)[0], True)
 
     print("[群聊 @（T210）：用的是群昵称]")
     s5 = fresh_store()

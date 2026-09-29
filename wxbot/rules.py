@@ -263,6 +263,11 @@ def should_reply(store: Store, username: str, display_name: str, content: str,
     own_recent = store.recent_own_texts(username, 10, self_chat=is_self_chat)
     if any(norm_ws(content) == norm_ws(t) for t in own_recent if norm_ws(t)):
         return False, "这就是我最近发过的内容，防自回环"
+    # ★2026-09-30：提醒 / 订阅通知 / "未确认送达"通知这类"代码生成 + send_plain 发送"的消息
+    # 不进 replies 表，上面那段认不出来；但它们发送时都会经过 record_own_sent 留骨架指纹。
+    # 真机事故：01:01 机器人把给主人发的"⚠️ 有 3 条回复没确认送达…"当成新消息，回了自己一句。
+    if store.is_own_sent(username, norm_ws(content)):
+        return False, "这就是我最近发过的内容，防自回环（主动通知/指令回执）"
 
     # ---- 模式判断 ----
     names = list(bot_names or [])

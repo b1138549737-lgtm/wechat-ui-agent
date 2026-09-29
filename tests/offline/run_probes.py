@@ -7,7 +7,7 @@
 
 分两档：
     python tests\\offline\\run_probes.py           # quick（约 30 秒）：空头支票崩溃 + 长跑保留
-    python tests\\offline\\run_probes.py --all     # 全部（约 6-8 分钟，会真跑 _run_async 循环）
+    python tests\\offline\\run_probes.py --all     # 全部（约 7-9 分钟，会真跑 _run_async 循环）
 
 改发端判分逻辑 / 消息恢复 / 订阅闸门 / 记忆后，建议跑 `--all` 一遍。
 """
@@ -24,7 +24,7 @@ ALL = QUICK + ["round5_regressions.py", "round8_drop_matrix.py",
                "round10_watch.py", "round11_recovery.py",
                "round19_retry_pre_send.py", "round9_privacy.py",
                "round20_fail_amplification.py", "round21_reminder_failure_notice.py",
-               "round22_verify_notice.py"]
+               "round22_verify_notice.py", "round23_self_loop_notice.py"]
 
 # 每个脚本必须满足的输出断言（"没跑用例"或"退回旧行为"都会在这里露出来）
 EXPECT = {
@@ -44,6 +44,8 @@ EXPECT = {
     "round21_reminder_failure_notice.py": ["✅ 符合预期"],
     # 2026-09-30：回复"点了发送但读端没回读"时也给主人留话（真机事故）
     "round22_verify_notice.py": ["✅ 符合预期"],
+    # 2026-09-30：机器人把自己发的通知当新消息、回了自己一句（01:01 真机）→ 通知也要防自回环
+    "round23_self_loop_notice.py": ["✅ 符合预期"],
 }
 
 
