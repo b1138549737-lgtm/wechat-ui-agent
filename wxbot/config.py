@@ -223,6 +223,30 @@ class Config:
                 problems.append(f"safety.{k} 不是已知配置项（不会生效）；"
                                 f"已知：{'/'.join(sorted(known_safety))}，"
                                 f"persona/reply 要写在 defaults 下面")
+        # ★2026-09-30（评审"方向 1：不自洽要一眼看出来"的收口）：**枚举值拼错**以前全是静默的 ——
+        #   实测 `ingest.source: weflow_see`、`trigger.mode: mentionn`、档位 `type: ollamma`
+        #   都不会被任何检查点名，运行时只是"行为悄悄变了"（换源 / 不回话 / 走错协议）。
+        src_ok = {"mcp", "mcp_only", "weflow", "weflow_sse", "weflow_rest", "both"}
+        src = str(self.get("ingest.source") or "").lower()
+        if src and src not in src_ok:
+            problems.append(f"ingest.source={src!r} 不是已知取值（写错会被当成 WeFlow 优先，静默换源）；"
+                            f"已知：{' / '.join(sorted(src_ok))}")
+        mode_ok = {"always", "whitelist_only", "mention", "keyword", "reply_to_bot", "probability"}
+        dm = str((self.get("defaults.trigger") or {}).get("mode") or "").lower()
+        if dm and dm not in mode_ok:
+            problems.append(f"defaults.trigger.mode={dm!r} 不是已知取值（写错会静默不回话）；"
+                            f"已知：{' / '.join(sorted(mode_ok))}")
+        for c in self.contacts():
+            cm = str((c.get("trigger") or {}).get("mode") or "").lower()
+            if cm and cm not in mode_ok:
+                problems.append(f"contacts「{c.get('name')}」的 trigger.mode={cm!r} 不是已知取值；"
+                                f"已知：{' / '.join(sorted(mode_ok))}")
+        type_ok = {"ollama", "openai", "anthropic", "gemini"}
+        for pname, pcfg in (self.get("llm.profiles") or {}).items():
+            pt = str((pcfg or {}).get("type") or "").lower()
+            if pt and pt not in type_ok:
+                problems.append(f"llm.profiles.{pname}.type={pt!r} 不是已知取值（写错会走错协议）；"
+                                f"已知：{' / '.join(sorted(type_ok))}")
         return problems
 
     def hints(self) -> list[str]:

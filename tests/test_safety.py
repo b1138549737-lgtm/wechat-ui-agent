@@ -75,6 +75,23 @@ def main():
     check("合法的 name/username 不提示",
           not any("永远匹配不上" in h for h in cmdok.hints()))
 
+    print("[枚举值拼错要点名（2026-09-30，评审方向 1 收口）]")
+    srcbad = base()
+    srcbad.data.setdefault("ingest", {})["source"] = "weflow_see"
+    check("ingest.source 拼错 → 结构问题点名",
+          any("ingest.source" in p for p in srcbad.validate_structure()))
+    modebad = base()
+    modebad.data.setdefault("defaults", {}).setdefault("trigger", {})["mode"] = "mentionn"
+    check("defaults.trigger.mode 拼错 → 结构问题点名",
+          any("defaults.trigger.mode" in p for p in modebad.validate_structure()))
+    typebad = base()
+    typebad.data["llm"]["profiles"]["local"]["type"] = "ollamma"
+    check("档位 type 拼错 → 结构问题点名",
+          any("llm.profiles.local.type" in p for p in typebad.validate_structure()))
+    check("示例配置本身不报这些（否则模板就是坏的）",
+          not any(k in p for p in base().validate_structure()
+                  for k in ("ingest.source", "trigger.mode", "profiles.", "type=")))
+
     print("[风控体检（2026-09-28 评审：账号行为形态四条）]")
     from wxbot.cli import risk_audit  # noqa: PLC0415
     c = base()
