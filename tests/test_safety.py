@@ -88,6 +88,10 @@ def main():
     typebad.data["llm"]["profiles"]["local"]["type"] = "ollamma"
     check("档位 type 拼错 → 结构问题点名",
           any("llm.profiles.local.type" in p for p in typebad.validate_structure()))
+    vbad = base()
+    vbad.data.setdefault("vision", {})["provider"] = "ollamma"
+    check("vision.provider 拼错 → 结构问题点名", 
+          any("vision.provider" in p for p in vbad.validate_structure()))
     check("示例配置本身不报这些（否则模板就是坏的）",
           not any(k in p for p in base().validate_structure()
                   for k in ("ingest.source", "trigger.mode", "profiles.", "type=")))

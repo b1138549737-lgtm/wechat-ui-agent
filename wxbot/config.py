@@ -247,6 +247,10 @@ class Config:
             if pt and pt not in type_ok:
                 problems.append(f"llm.profiles.{pname}.type={pt!r} 不是已知取值（写错会走错协议）；"
                                 f"已知：{' / '.join(sorted(type_ok))}")
+        vp = str(self.get("vision.provider") or "").lower()
+        if vp and vp not in ("ollama", "openai"):
+            problems.append(f"vision.provider={vp!r} 不是已知取值（写错会被当成 ollama，"
+                            f"云端配置会走错协议）；已知：ollama / openai")
         return problems
 
     def hints(self) -> list[str]:
