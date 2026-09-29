@@ -30,7 +30,14 @@ function Find-Python {
             Where-Object { $_.Name -match '^cpython-3\.1[0-3]' } |
             ForEach-Object { Join-Path $_.FullName 'python.exe' } |
             Where-Object { Test-Path $_ } |
-            Sort-Object -Descending)
+            # ★2026-09-30：优先 3.12 / 3.11 —— 这两个是**实测通过**的版本
+            #   （3.13 上游 maa-mcp/maafw 轮子可能还没齐，装到一半失败体验很差；3.10 老一点）
+            Sort-Object { switch -Regex ($_) {
+                'cpython-3\.12' { 0 }
+                'cpython-3\.11' { 1 }
+                'cpython-3\.13' { 2 }
+                default { 3 }
+            } })
     }
     foreach ($name in @('python', 'py')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue

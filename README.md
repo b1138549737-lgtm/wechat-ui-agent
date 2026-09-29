@@ -3,7 +3,7 @@
 **在你自己的微信上跑一个 AI 助理** —— 本机运行 · 界面自动化收发（不修改微信客户端）· 本地 Ollama 或任意云端大模型
 
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?style=flat-square)
-![python](https://img.shields.io/badge/python-3.10%20~%203.13-3776AB?style=flat-square&logo=python&logoColor=white)
+![python](https://img.shields.io/badge/python-3.11%20%2F%203.12%20tested-3776AB?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![tests](https://img.shields.io/badge/tests-24%20suites%20%2F%20970%2B%20asserts-brightgreen?style=flat-square)
 
@@ -75,7 +75,7 @@ WeFlow (HTTP + SSE)          ┌─ 触发/限流规则（@/引用/关键词/时
 | 读消息 | [WeFlow](https://github.com/hicccc77/WeFlow) 在运行（默认 `http://127.0.0.1:5031`），并拿到它的 `access_token` |
 | 发消息 | [`maa-mcp`](https://github.com/MaaXYZ/MaaMCP)（MaaFramework 的 MCP 封装）—— `install.ps1` 会自动装好，不用手工配 |
 | 模型 | 本地 [Ollama](https://ollama.com/)，或任意 OpenAI 兼容 / Anthropic / Gemini 端点 |
-| Python | 3.10 – 3.13（推荐 3.12）。没装 Python 也行：装 [uv](https://astral.sh/uv) 后 `install.ps1` 会自动找一个 |
+| Python | **3.11 / 3.12 实测通过**（推荐 3.12；3.10 理论可用，3.13+ 上游 `maa-mcp` 轮子可能还没齐，脚本会优先挑 3.12/3.11）。没装 Python 也行：装 [uv](https://astral.sh/uv) 后 `install.ps1` 会自动找一个 |
 
 ## 快速开始
 
@@ -85,7 +85,7 @@ WeFlow (HTTP + SSE)          ┌─ 触发/限流规则（@/引用/关键词/时
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-脚本会：找 Python（3.10–3.13）→ 建 `.venv` → 装依赖（pyyaml / mcp / maa-mcp / pillow，失败自动换国内镜像）→ 从 `config.example.yaml` 生成 `config.yaml` → 跑一遍 `doctor` 自检。
+脚本会：找 Python（优先 3.12 / 3.11）→ 建 `.venv` → 装依赖（pyyaml / mcp / maa-mcp / pillow，失败自动换国内镜像）→ 从 `config.example.yaml` 生成 `config.yaml` → 跑一遍 `doctor` 自检。
 
 ### 2）改 `config.yaml`
 
