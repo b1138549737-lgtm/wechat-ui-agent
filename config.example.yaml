@@ -1,0 +1,282 @@
+# 微信 AI 自动回复 · 配置模板（复制成 config.yaml 使用）
+app:
+  data_dir: data              # SQLite/日志/截图都放这里
+  dry_run: false              # true = 只打印不发送（调试）
+
+# ── LLM：可配多套，全都要也没问题 ──
+llm:
+  active: local
+  fallback: [cloud]           # active 失败时按顺序回退
+  profiles:
+    local:
+      type: ollama            # ollama | openai | anthropic | gemini
+      base_url: http://127.0.0.1:11434/v1
+      model: qwen3.5:9b       # 换成你本地 ollama list 里的模型
+      api_key: ""
+      temperature: 0.7
+      max_tokens: 1200        # 推理模型必须给足（300 会被思考链吃光、正文为空）
+      timeout: 90
+      allow_context: true     # 允许带聊天上下文（本地安全）
+      think: false            # 关键：关掉思考，否则 qwen3/r1 这类模型只输出 reasoning
+      max_tokens: 600         # 本地档位"要求少一点"：短回复就行
+      max_context_turns: 3    # 只看最近 3 轮
+      max_memory: 3           # 最多 3 条长期记忆
+      persona_extra: |        # 只对这一档追加的要求
+        你是本地小模型：回复短、口语化、别展开；拿不准就说不确定，不要编实时信息。
+    # 可选的第二套本地模型：和 vision.model 用同一个模型时，不会互相把对方挤出显存
+    # （Ollama 默认只常驻 1 个模型；8G 显卡装不下 qwen9B + gemma）
+    local_gemma:
+      type: ollama
+      base_url: http://127.0.0.1:11434/v1
+      model: gemma4:e4b
+      temperature: 0.7
+      max_tokens: 800
+      timeout: 90
+      allow_context: true
+      think: false
+    cloud:
+      type: openai            # OpenAI 兼容：DeepSeek/Kimi/通义/豆包/OpenAI 都走这个
+      base_url: https://api.deepseek.com/v1
+      model: deepseek-chat
+      api_key: ${LLM_CLOUD_KEY}
+      temperature: 0.8
+      max_tokens: 500
+      timeout: 60
+      allow_context: false    # 云端默认不带上下文（隐私）
+      # 云端档位"能力强就要求多一些"：更长上下文、更多记忆、允许更细致
+      max_context_turns: 12
+      max_memory: 12
+      max_style: 5
+      max_tool_rounds: 2      # 允许"要工具 → 拿结果 → 再说"两轮（能不能调工具见 tools.web.profiles）
+      persona_extra: |
+        你跑在云端、能力更强：可以更细致、该追问就追问，回复仍保持简洁自然。
+        遇到需要实时或外部信息的问题（天气/新闻/价格/赛程/发布时间/你不确定的常识），
+        先调用 web_search 查，再按返回的资料回答；资料里没有的就直说查不到，绝不编造，
+        并带上信息来源或时间。（前提：tools.web.profiles 里列了这个档位）
+        你还有三个自用工具：对方说"提醒我…"用 remind 建提醒；想回忆聊过什么用 find_in_history；
+        对方**交代自己的事**（称呼/偏好/忌口/习惯/生日/约定）就用 remember 记成长期记忆 ——
+        不必等他说"记住"，"我喜欢吃香菜""我不吃辣""我住在示例市"这类都要记。
+        ★绝不空头支票：打算说"记着了/记住了"之前必须先真的调用 remember，没调就别那么说。
+
+ingest:
+  source: mcp                 # mcp | weflow_sse | both
+  mcp:
+    url: http://127.0.0.1:10392/mcp
+    token_file: "%APPDATA%/wechat-data-analysis-desktop/output/runtime_settings.json"
+    poll_seconds: 2             # 轮询间隔。计划书里 ingest 的验收是"延迟 ≤2s"；
+                                # WeFlow 的 SSE 主动推送开着时是亚秒级，这个只作兜底
+  backlog_max_age_seconds: 600   # 只处理这么久以内的积压消息（防止重启后回复旧消息）
+  max_message_chars: 1000        # 入站消息超过这么多字就截断（实测 1740 字的消息模型只"看到一句"）
+  weflow:
+    base_url: http://127.0.0.1:5031
+    access_token: ""
+    exe_path: ""              # doctor --fix 找不到 WeFlow.exe 时指给它（留空=自动探测常见安装路径）
+
+send:
+  verify_title: true
+  verify_full_name: true      # 非自聊会话必须完整名匹配（B1）
+  verify_after_send: true
+  retry: 2
+  # 留空 = 自动查找：环境变量 MAA_EXE → PATH 里的 maa_mcp → 工程内 .venv312
+  maa_exe: ""
+  keep_shots: false           # true = 每次操作存截图（排查用，每次慢 1-2 秒）
+  total_timeout_seconds: 120  # 单次处理的整体超时
+  shots_dir: data/shots
+  # ── 发送通路的底层方式（改前先看 README「发送通路」一节）──
+  screencap_method: auto      # auto = 启动时逐个实检；也可写死 PrintWindow/FramePool/ScreenDC/…
+                              # 实测 FramePool 会返回全黑帧（OCR 0 条），auto 会自动跳过
+  mouse_method: PostMessage   # PostMessage | PostMessageWithCursorPos | Seize
+                              # 实测：右键菜单（引用/转发）用普通 PostMessage 弹不出来，
+                              # 必须换成 PostMessageWithCursorPos（代价：点的时候光标会动一下）
+  keyboard_method: PostMessage  # PostMessage | Seize（快捷键类操作只有 Seize 生效）
+  window_title: 微信           # 微信主窗口标题。换微信版本/非中文界面时要改（如 Weixin / WeChat）
+  list_first: true            # 优先"点左侧列表行"切换会话（比搜索面板快、也更稳）
+                              # 注意两个实测行为：① 点"已经选中"的那一行会让微信取消选中，
+                              #  所以代码"点完没确认就再点一次"（见 send_maa._open_from_list）；
+                              # ② 搜索面板在某些账号/窗口下 OCR 不稳定，所以它只当兜底
+  click_jitter: 2             # 点击坐标随机抖动像素数（降低"每次都点同一像素"的特征）
+  input_offset: [-280, -50]   # 输入框落点 = 发送按钮 + 这个偏移（实测值；窗口布局改了要调）
+  freeze:                     # 画面静止检测（借鉴 MaaFramework wait_freezes）
+    enabled: true
+    stable_ms: 350            # 连续静止这么久才算界面稳定
+    timeout_ms: 5000          # 单次等待上限
+    changed_ratio: 0.002      # 两帧差异像素占比低于它就算"没变"（0.2%）
+
+# 机器人自己的信息（群聊 @ 触发、引用触发靠它判断）
+bot:
+  names: []          # 你在群里的昵称/群昵称。留空也行：运行时会自动从群成员接口取
+  username: ""       # 本号 wxid。**留空/填错都没关系**：启动时自动认当前登录账号（见 auto_detect）
+  auto_detect: true  # true = 认到新账号就自动用它（换微信账号不用手改配置）；想固定就设 false
+  # wechat_data_dir: <WECHAT_DATA_DIR>   # 可选：指定微信数据目录（认号的兜底来源之一）
+  watch_notify: 文件传输助手   # /订阅 命中的通知发到哪个会话（留空 = 就发回原会话）
+
+watchdog:
+  enabled: true
+  interval_seconds: 300          # 多久体检一次（秒）
+  max_consecutive_failures: 3    # 连续失败这么多次就自动暂停发送
+
+commands:
+  # 微信里的 /指令：直接发 "/状态" "/记忆" "/人设 你是……" "/提醒 20分钟后 喝水"
+  # 就能查状态、改设置、让机器人到点主动提醒你
+  # 只认主人（群里你自己的号发的、或自聊会话里你自己发的），别人的消息不会触发
+  enabled: true
+  prefix: /                      # 指令前缀；改了之后 /帮助 也要跟着改
+  sessions: []                   # 允许用指令的会话（名字或 username）。留空 = 只有自聊会话（self_ok）能用，
+                                 # 免得在好友私聊窗口里手滑打 /记忆 就把内容发给对方；想让某个群也能用就填群名
+
+permissions:
+  # 群内分级权限：owner（本号，自动认）> admin（你点的人 + 可选群主）> member（群里其他人）
+  # 每条指令要求什么角色写在 wxbot/commands.py 的 REQUIRED_ROLE；权限不够时**当普通消息处理**（不回"你没权限"）
+  enabled: true                  # false = 回到"只有主人能用指令"的老行为
+  allow_in_groups: true          # 允许在被监听的群里用指令（按角色限制）
+  group_owner_is_admin: true     # 群主自动算管理员（靠读端的 isOwner 判定）
+  member_cooldown_seconds: 10    # 普通成员用 /搜索 /总结 /问 这类"花钱指令"的冷却秒数（0 = 不限）
+  owners: []                     # **本号之外的"主人"**：写 wxid 或显示名/备注。
+                                 # 双号场景（机器人在小号、你本人是大号）必须填，否则你只是普通成员：
+                                 # 不能 /静音、不能让机器人建提醒。例：[wxid_abc, 主人]
+  admins: []                     # 额外管理员：wxid 或显示名（如 [wxid_abc, 小A]）
+                                 # 单个会话单独指定：在那个 contact 下写 permissions: {owners: [...], admins: [...]}
+
+audit:
+  shots_keep_days: 7             # 截图按天存放，超过天数自动清理
+  messages_keep_days: 30         # 消息表只留最近 N 天（已处理完的），防止常驻跑久了 DB 一直涨
+  replies_keep_days: 180         # 回复审计行保留天数（统计/来源用；长跑时防止 replies 表无界增长）
+
+# Web 控制面板
+web:
+  token: ""                      # 留空 = 首次启动生成并缓存到 data/web_token.txt；
+                                 # 想看固定地址就写死一个随机串（面板能替你发消息，别泄露）
+
+memory:
+  enabled: true
+  extract_every_n_messages: 10   # 每 N 次成功回复提炼一次长期记忆
+  lurk_extract: true             # 「没被 @ 的消息也静默提炼记忆」（只记不说；只写群共享记忆）
+  lurk_every_n_messages: 10      # 攒够这么多条没触发的群消息，提炼一次（0 = 关掉）
+  instant_signals: true          # 「我喜欢/我不吃/记住…」这类话**立刻**提炼一次，不等每 N 条
+  max_injected: 8                # 回复时最多注入几条记忆
+  summary_enabled: true          # 长对话滚动摘要：聊得久了自动压缩成一段，省 token 也不丢事
+  summary_trigger_messages: 6    # 攒够这么多条"没进摘要的旧消息"才压缩一次（省模型调用）
+  summary_max_chars: 200
+
+# 图片理解（T214 第二步）：需要本地 Ollama 里的**多模态**模型，默认关闭
+vision:
+  enabled: false             # 打开前先准备好一个能看图的模型（本地 ollama 或云端多模态）
+  provider: ollama           # ollama = 本地（如 gemma4:e4b / qwen2.5vl）；openai = 云端兼容（如 deepseek-flash）
+                             # ⚠️ provider=openai 时**对方发来的原图会 base64 上传到云端**（隐私取舍，自己决定）
+  base_url: http://127.0.0.1:11434
+  model: ""                  # 留空 = 关闭（不会去猜你装了哪个）
+  api_key: ""                # provider=openai 时填 ${LLM_CLOUD_KEY} 这类占位符
+  max_chars: 400             # 描述文本长度上限（太短会把图上的字/名字砍掉，实测 120 不够）
+  max_tokens: 1200           # 推理型视觉模型必须给足，否则正文为空（实测 200 → 空）
+  timeout: 90
+  # 可选：主视觉模型拿不到描述时用本地兜底。⚠️ 实测 gemma4:e4b 看图很不可靠
+  #（会把"提示词"当成图片内容答回来），宁可留空：云端失败就安静跳过，别拿错的描述去搜。
+  fallback: {}
+
+# 联网工具（需要 pip install ddgs trafilatura，两者都是成熟库、都不要 API key）
+#   - 模型自己调：命中 tools.web.profiles 的档位可以用 function calling 主动搜（实测 deepseek-flash 支持）
+#   - 用户显式要求：消息以 force_prefixes 开头（如 "/搜索 今天天气"）→ 先搜好再塞给模型（本地小模型也吃得上）
+tools:
+  profiles: [cloud]          # 允许"模型自己调工具"的档位（联网 + 机器人动作共用这一个开关）
+  web:
+    enabled: false             # 打开前先装依赖：pip install ddgs trafilatura
+    # bing_direct = 自己直连 cn.bing.com 解析结果（**不需要代理/VPN**，实测 0.3 秒出结果）；
+    # 后面几个走 ddgs 库（实测 2026-09-27 全部返回空，留作补充）。被墙的会自动跳过。
+    backends: [bing_direct, bing, sogou, '360', duckduckgo, brave]
+    max_results: 5             # 取前几条结果
+    fetch_top: 2               # 前 N 条顺带抓正文（更准，1-2 秒/篇，并发抓）
+    max_chars: 1400            # 单篇正文上限
+    timeout: 15                # 单后端超时
+    budget_seconds: 30         # 一次回复里联网的总预算，超了就不再查（别把回复拖成几十秒）
+    search_api_key: ''         # 可选：Tavily（或国内兼容镜像）的 key；填了就优先用 API 搜索
+    search_api_url: https://api.tavily.com/search
+    force_prefixes: ['/搜索', '/联网']
+    profiles: [cloud]          # 允许"模型自己调工具"的档位；本地小模型不列在这里（它不会调，也省显存）
+    max_result_chars: 6000     # 单次工具结果上限（别把上下文撑爆）
+  max_total_chars: 12000       # 一轮里"回给模型的资料总量"上限
+  assistant:                   # 让模型在"说人话"时自己调机器人自己的动作
+    enabled: true              #   remind 到点提醒（只认主人）/ find_in_history 翻本会话历史 / remember 记长期记忆
+
+knowledge:
+  # 本地知识库（借鉴 AstrBot Knowledge Base / chatgpt-on-wechat 的 knowledge，但**不用 embedding**）
+  # 把 .md/.txt 丢进这个目录 → 微信里发 /问 <问题>，或者直接问（模型会自己调 lookup_notes）
+  enabled: true
+  dir: knowledge               # 相对工程根；不存在就是空知识库，不影响运行
+  max_snippets: 3              # 最多取几段（命中段还会各带一段"紧随其后"的，防答案在下一段）
+  max_chars: 2000              # 一次塞给模型的资料总字数上限
+  min_role: admin              # 谁能用 /问 /知识：admin（默认，只有主人/管理员）| member（群里所有人）
+  max_file_mb: 1               # 单个文件超过这么大就跳过（防几百 MB 的库拖垮每次读盘）
+  max_chunks: 800              # 总块数上限（超了只取前 800 块）
+
+defaults:
+  # 全局人设：**不填也能用**（代码会给一层"你是谁/在哪/这句谁说的"的身份底座），
+  # 但填了它回复才有稳定的语气。想要不同会话不同性格就在 contacts[] 里单独写 persona。
+  persona:
+    system_prompt: |-
+      你是这台微信上的 AI 助理（本人授权你代回消息），不是人。
+      风格：口语、简短（默认一两句）、不客套、不堆表情；不知道就直说不知道，绝不编事实和实时信息。
+      有人问你是不是 AI，直接承认，不用装成本人。
+      不主动谈钱、不替人做决定、不承诺做不到的事。
+    max_context_turns: 6      # 默认看最近几轮（各 LLM 档位还能自己覆盖，见 llm.profiles.*）
+  trigger:
+    mode: whitelist_only      # always | whitelist_only | mention | keyword | reply_to_bot | probability
+    quote_any_own: false      # T211：引用触发默认只认「引用机器人生成过的回复」；
+                              # 改成 true 则"引用你发过的任意一条"也算（机器人跑在你账号上，
+                              # 这个开关打开后，群里别人引用你旧话也会被当成在跟机器人说话）
+    keywords: []
+    probability: 0.0
+    time_window: ["08:00", "23:30"]
+    ignore_types: [image, voice, video, file, emoji]
+  limits:
+    per_contact_gap_seconds: 30
+    jitter_ratio: 0.3         # 实际间隔 = gap × [1, 1+jitter)，避免固定节奏像机器
+    per_contact_hourly: 10
+    per_contact_daily: 60
+    global_per_hour: 60
+    global_per_day: 150       # 全局每日上限（比每小时更需要，长时间跑才安全）
+    burst_window: 120         # 突发窗口：这么长时间内同一会话最多回 burst_max 条
+    burst_max: 3
+    defer_when_limited: false # true = 被上面这些限流拦下的消息**延后补回**（到 defer_seconds
+                              #   后再判一次），而不是直接丢弃；默认 false（宁可漏发、日志留痕）
+    defer_seconds: 60         # 延后多久再试（要 ≥ 被拦的那个窗口，否则还会被拦）
+    flood_messages: 12        # 刷屏保护：同一个人 60 秒内超过这么多条 → 冷却 3 分钟（不回、不补回）
+    flood_window_seconds: 60
+    flood_cooldown_seconds: 180
+    burst_merge_seconds: 8    # "连点 @"合并窗口：空 @ 一律等；带内容的 @ 10 秒内连发也等
+    merge_window: 0           # >0：对方连发多条时，等这么多秒合并成一次回复（0=每条都回）
+    proactive_gap_seconds: 15 # 主动发消息（提醒/订阅通知）的最小间隔 —— 主动发送也要守闸门
+    proactive_hourly: 20      # 主动发消息的每小时上限；被挡下的订阅命中会合并成"另有 N 条"
+    min_write_gap_seconds: 3  # **所有对外写动作**（回复/指令回执/欢迎语）的统一最小间隔（T370）
+    write_wait_max_seconds: 8 # 差得不多就等一等再发（≤这个秒数）；差太多才交给"延后补回"
+    gap_wait_max_seconds: 8   # "同会话间隔不够"时最多等这么久再发；0 = 关掉（退回"跳过/延后"）
+  reply:
+    prefix: ""                # 每条回复前面固定加一段（例如"【助理】"），默认不加
+    max_chars: 120            # 回复硬上限（防止模型啰嗦）
+    allow_emoji: false        # 是否允许用表情（不填 = 不干预，人设里怎么写就怎么来）
+    max_lines: 2              # 回复最多几行（微信里换行=分段；超出的行并进最后一行，不丢字）
+    at_sender_in_group: false # 群里回复时 @ 一下提问的人（T213）
+    llm_fail_text: 我这边卡了一下，你再说一遍？   # 所有档位都失败时回这句，别静默不回
+    send_fail_text: 我这边没对上，稍后再试          # 会话已打开但发送/核对失败时回这句（同一会话 10 分钟最多一次）
+
+safety:
+  # 风险提示（写在启动横幅里，`wxbot ack-risk` 确认一次）
+  require_ack: false          # true = 没确认过风险提示就拒绝启动（默认 false，不拦后台运行）
+
+contacts:
+# 会话级"主动搭话"（可选）：静默 interval_minutes 分钟（±jitter）后由模型按人设主动开口
+#   proactive_chat: { enabled: true, interval_minutes: 45, jitter_ratio: 0.5 }
+  - name: 文件传输助手
+    username: filehelper
+    enabled: true
+    self_ok: true              # 自聊会话（PC 端记 isSent=True）
+    trigger: { mode: always }
+    limits: { per_contact_gap_seconds: 5 }
+  - name: 示例机器人
+    username: wxid_examplebot
+    enabled: false
+    trigger: { mode: mention }
+  - name: 示例群C
+    username: 10000000002@chatroom
+    enabled: false
+    trigger: { mode: mention, keywords: ["机器人"] }
+    persona: { system_prompt: "群聊里简洁、别抢话、不主动插话。" }

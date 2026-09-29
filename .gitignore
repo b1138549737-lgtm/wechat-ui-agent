@@ -8,6 +8,7 @@ shots/
 *.err
 config.yaml
 config.*.yaml
+!config.example.yaml
 *.bak
 *.bak-*
 __pycache__/
