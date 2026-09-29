@@ -191,6 +191,19 @@ class Config:
         for fb in (self.get("llm.fallback") or []):
             if fb not in profiles:
                 problems.append(f"llm.fallback 里的 {fb} 不存在")
+        # ★2026-09-29 评审"方向 1：档位 / 工具 / 权限 三张表要自洽"：
+        #   tools.profiles 与 tools.web.profiles 里写的名字必须是 llm.profiles 里**真实存在**的档位 ——
+        #   拼错一个字母不会报错，只会静默变成"这个档位永远不允许调工具"（评审说的"不自洽"就是这种）。
+        for key in ("tools.profiles", "tools.web.profiles"):
+            names = self.get(key)
+            if names is None:
+                continue
+            if not isinstance(names, list):
+                problems.append(f"{key} 应该是列表，现在是 {type(names).__name__}")
+                continue
+            for n in names:
+                if str(n) not in profiles:
+                    problems.append(f"{key} 里的 {n!r} 在 llm.profiles 里不存在（拼错？）")
         for c in self.contacts(enabled_only=True):
             if not c.get("name") or not c.get("username"):
                 problems.append(f"contacts 里有一项缺 name/username: {str(c)[:80]}")
@@ -228,6 +241,16 @@ class Config:
         if self.get("vision.enabled") and not self.get("vision.model"):
             out.append("vision.enabled 打开了但 vision.model 是空的：图片理解不会生效"
                        "（先 ollama pull 一个多模态模型再填进来）")
+        # ★2026-09-29（评审方向 1）：一眼看出"当前档位到底会不会自己调工具"。
+        # 本地小模型不列进 tools.profiles 是**故意的**（它不会调、还占显存），所以只在
+        # 当前档位不是 ollama 时提示，避免正常配置也天天刷一行。
+        listed = self.get("tools.profiles") or self.get("tools.web.profiles") or []
+        active_p = str(self.get("llm.active") or "")
+        _, _, _profs = self.llm_profiles()
+        is_local = str(((_profs or {}).get(active_p) or {}).get("type") or "").lower() == "ollama"
+        if listed and active_p and not is_local and active_p not in [str(x) for x in listed]:
+            out.append(f"当前档位 {active_p} 不在 tools.profiles（{listed}）里 → 它不会自己调工具"
+                       f"（联网/提醒/记忆）；想让它调就把 {active_p} 加进这个列表")
         return out
 
     # 推理模型名单：这些模型不关思考会把 token 全花在 reasoning 上，正文就空了

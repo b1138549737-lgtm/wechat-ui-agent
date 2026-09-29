@@ -31,6 +31,23 @@ def main():
     check("defaults 里的未知键会被点名（写错层级 = 静默不生效）",
           any("defaults.nonsense" in p for p in bad.validate_structure()))
 
+    # ★2026-09-29 评审"方向 1：档位 / 工具 两张表自洽"
+    toolbad = base()
+    toolbad.data.setdefault("tools", {})["profiles"] = ["clould"]       # 故意拼错
+    check("tools.profiles 里档位名拼错会被点名（否则静默变成'谁都不能调工具'）",
+          any("tools.profiles" in p and "clould" in p for p in toolbad.validate_structure()))
+
+    toolhint = base()
+    toolhint.data.setdefault("tools", {})["profiles"] = ["local"]        # 合法名，但当前档位是 cloud
+    toolhint.data.setdefault("llm", {})["active"] = "cloud"
+    check("当前档位不在 tools.profiles 里 → 启动提示'它不会自己调工具'",
+          any("不会自己调工具" in h for h in toolhint.hints()))
+
+    localactive = base()                                                 # 本地档不列进工具是故意的
+    localactive.data.setdefault("llm", {})["active"] = "local"
+    check("本地档（ollama）不提示这条（免得正常配置天天刷）",
+          not any("不会自己调工具" in h for h in localactive.hints()))
+
     print("[风控体检（2026-09-28 评审：账号行为形态四条）]")
     from wxbot.cli import risk_audit  # noqa: PLC0415
     c = base()

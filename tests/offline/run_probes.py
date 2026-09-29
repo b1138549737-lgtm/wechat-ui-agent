@@ -22,7 +22,7 @@ PROBES = HERE / "probes"
 QUICK = ["round18_empty_promise_crash.py", "round16_retention.py"]
 ALL = QUICK + ["round5_regressions.py", "round8_drop_matrix.py",
                "round10_watch.py", "round11_recovery.py",
-               "round19_retry_pre_send.py"]
+               "round19_retry_pre_send.py", "round9_privacy.py"]
 
 # 每个脚本必须满足的输出断言（"没跑用例"或"退回旧行为"都会在这里露出来）
 EXPECT = {
@@ -34,6 +34,8 @@ EXPECT = {
     "round11_recovery.py": ["✅ 符合预期"],
     # 2026-09-29：发送前失败 → 跨轮重试（不双发）+ 兜底话术口径
     "round19_retry_pre_send.py": ["✅ 符合预期"],
+    # 2026-09-29：隐私边界（注入层）—— 私聊秘密不进群、甲的事实乙看不到
+    "round9_privacy.py": ["✅ 符合预期"],
 }
 
 
