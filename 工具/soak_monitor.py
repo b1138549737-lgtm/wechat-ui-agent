@@ -254,8 +254,17 @@ def report(root: Path) -> int:
     def delta(key):
         return (last_st.get(key) or 0) - (first_st.get(key) or 0)
 
-    rss = [r.get("panel_rss_mb") for r in rows if r.get("panel_rss_mb")]
     db_mb = [r.get("db_mb") for r in rows if r.get("db_mb")]
+    # ★2026-09-29：内存必须**按 panel_pid 分段**看 —— 跨进程比较会算出假的"增长"
+    # （实测踩过：起始值来自旧进程、结束值来自另一个进程，看起来涨了 68%，其实是重启后的两个进程）
+    runs: list[list[dict]] = []
+    for r in rows:
+        if r.get("panel_rss_mb") is None:
+            continue
+        if runs and runs[-1][-1].get("panel_pid") == r.get("panel_pid"):
+            runs[-1].append(r)
+        else:
+            runs.append([r])
 
     print("=" * 62)
     print(f"长跑报告　{first.get('iso')} → {last.get('iso')}　({hours:.1f} 小时 / {samples} 个采样)")
@@ -273,13 +282,25 @@ def report(root: Path) -> int:
           f"其中该回但错过 +{delta('missed_should_reply')}）")
     print(f"异常键/记忆     ：数据异常 +{delta('weird_keys')} 条"
           f"／记忆 {last_st.get('memories')} 条")
-    print(f"失败分类        ：发送 {last_st.get('fail_deliver') or 0}"
-          f" ／ 核对 {last_st.get('fail_verify') or 0}"
-          f" ／ 模型 {last_st.get('fail_llm') or 0}"
-          f" ／ 准备 {last_st.get('fail_prepare') or 0}"
-          f"　（旧采样无此字段时显示 0）")
-    if rss:
-        print(f"面板内存        ：起始 {rss[0]} MB → 现在 {rss[-1]} MB（峰值 {max(rss)} MB）")
+    print(f"失败分类（本段）  ：发送 +{delta('fail_deliver')}"
+          f" ／ 核对 +{delta('fail_verify')}"
+          f" ／ 模型 +{delta('fail_llm')}"
+          f" ／ 准备 +{delta('fail_prepare')}"
+          f"　（旧采样无此字段时按累计值算，偏保守）")
+    if runs:
+        cur = runs[-1]
+        cur_rss = [r["panel_rss_mb"] for r in cur]
+        peak_all = max(r["panel_rss_mb"] for r in rows if r.get("panel_rss_mb") is not None)
+        span_h = (cur[-1]["ts"] - cur[0]["ts"]) / 3600.0
+        if len(cur_rss) == 1:
+            trend = f"当前 {cur_rss[0]} MB"
+        else:
+            trend = f"{cur_rss[0]} MB → {cur_rss[-1]} MB（本进程峰值 {max(cur_rss)} MB）"
+        print(f"面板内存        ：本次进程（PID {cur[-1].get('panel_pid')}）{trend}"
+              f"　已观测 {span_h:.1f} 小时 / {len(cur)} 个采样")
+        if span_h < 2 or len(cur) < 5:
+            print("                  ↳ 本次进程观测时长不够（<2 小时），还不能判断内存趋势")
+        print(f"                  ↳ 历史峰值 {peak_all} MB（跨进程，只当上限参考，别拿来算增长率）")
     if db_mb:
         print(f"DB 大小         ：起始 {db_mb[0]} MB → 现在 {db_mb[-1]} MB")
     # 12 小时滚动段（看最近一段是否退化）
@@ -292,6 +313,7 @@ def report(root: Path) -> int:
               f"，中位耗时 {r_el[len(r_el) // 2]:.1f}s")
     print("-" * 62)
     print("判定口径：存活率 ≥99%、中位耗时 ≤10s、失败与『该回但错过了』为 0 → 达标")
+    print("内存只作观察：只看**同一进程内**的趋势（>=6 小时才有参考价值）")
     return 0
 
 

@@ -15,7 +15,7 @@ import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from wxbot.cli import reply_with_sender  # noqa: E402
+from wxbot.cli import reply_with_sender, status_for_stage  # noqa: E402
 from wxbot.config import Config  # noqa: E402
 from wxbot.store import Store  # noqa: E402
 
@@ -187,6 +187,15 @@ def main():
     check("第一次失败第二次成功", ok2, True)
     check("确实试了两次", len([c for c in s2.calls if c[0] == "deliver"]), 2)
     check("最终只真发出 1 条", len(FakeWeFlow.messages) - before, 1)
+
+    print("[状态映射：发送前失败可重试；未知阶段保守不重发（2026-09-29）]")
+    check("成功 → replied", status_for_stage(True, "ok"), "replied")
+    check("prepare 失败 → failed（可重试）", status_for_stage(False, "prepare"), "failed")
+    check("llm 失败 → failed（可重试）", status_for_stage(False, "llm"), "failed")
+    check("deliver 失败 → failed（没点过发送，可安全重试）",
+          status_for_stage(False, "deliver"), "failed")
+    check("未知阶段 → sent_unverified（保守，不重发）",
+          status_for_stage(False, "unknown"), "sent_unverified")
 
     print("[关键：核对已改后台（2026-09-28 评审第二刀）——主路径乐观、后台回填]")
     FakeWeFlow.messages.clear()               # 清干净：否则会被前面几轮同样文案的"已发送"骗过

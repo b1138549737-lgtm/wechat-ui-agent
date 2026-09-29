@@ -1355,6 +1355,25 @@ async def verify_sent(cfg: Config, username: str, text: str, timeout: float = 15
     return False, "未在记录里确认"
 
 
+def status_for_stage(ok: bool, stage: str) -> str:
+    """回复结果 → 消息状态（纯函数，便于单测）。
+
+    ★2026-09-29（评审"不重发 / 不丢消息"的边界）：`deliver` 阶段的失败**一定没点过发送** ——
+    `send_maa.deliver` 只在"点发送之前"返回 False（找不到发送按钮 / 拿不到 Seize 键盘 /
+    身份校验不过都是这一档）；点下去之后的收尾异常在发送器内部按"已发出"处理。
+    所以 deliver 失败是**可安全重试**的：以前一律记成 `sent_unverified`（当作"可能已发出，
+    永不重试"），等于把偶发失败的消息永久丢掉 —— 真机 2026-09-28 20:39 因为
+    "无法获得 Seize 键盘控制器"丢过一条私聊回复。
+
+    其余阶段（包括未来新增的未知阶段）一律保守处理：不重试，免得双发。
+    """
+    if ok:
+        return "replied"
+    if stage in ("prepare", "llm", "deliver"):
+        return "failed"
+    return "sent_unverified"
+
+
 async def _verify_backfill(cfg: Config, username: str, text: str,
                            since_ts: float, rid: int) -> None:
     """后台核对送达并回填 replies（2026-09-28 评审：核对不挡关键路径）。
@@ -2874,19 +2893,20 @@ async def _run_async(cfg: Config, args) -> int:
             store.finish(key, "failed", f"{type(exc).__name__}: {exc}")
             return
         log(f"   {'✅' if ok2 else '❌'} [{stage}] {reply!r} {detail}")
-        if ok2:
-            status = "replied"
-        elif stage in ("prepare", "llm"):        # 发送前失败 → 可安全重试
-            status = "failed"
-        else:                                     # 已点发送但没确认 → 不重试，免得重发
-            status = "sent_unverified"
+        # 发送前失败（prepare / llm / deliver）→ failed（下一轮会被重试）；
+        # 其余一律 sent_unverified（不重试，免得双发）。判据见 status_for_stage。
+        status = status_for_stage(ok2, stage)
         RT.note_reply(contact["name"], m["content"], reply, ok2, detail, stage)
         # ★2026-09-27 审查 P2"放弃时用户无感"：**会话已经打开**但发送/核对失败时，
         # 回一句短话（同一会话 10 分钟最多一次），别让人只看到"它不理我"。
         # 注意：只有在 prepare 成功（_current 就是本会话）时才敢发，避免发进别的聊天。
         # ★2026-09-27 工单第 8 条：**只有 deliver 阶段**（明确"没发出去"）才回兜底话术。
         # `verify` 只是"点过发送、读端没核对上"——这时候再发一条就是双发（round11 A 复现过）。
-        if not ok2 and stage == "deliver" and not args.dry_run:
+        # ★2026-09-29：deliver 失败现在会自动重试（状态 = failed），所以兜底话术
+        # 只在"重试用完"（attempts ≥ 2，不会再重试）时才发 —— 否则会变成
+        # "兜底话 + 重试成功的正文"两条消息。
+        if (not ok2 and stage == "deliver" and not args.dry_run
+                and store.attempts(key) >= 2):
             fb = str((eff.get("reply") or {}).get("send_fail_text")
                      or "我这边没对上，稍后再试").strip()
             ck = f"sendfail|{contact['username']}"

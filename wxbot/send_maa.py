@@ -974,8 +974,15 @@ class MaaSender:
 
         # ⑤ 点发送
         await self.click(main, fx + fw // 2, fy + fh // 2)
-        await self.settle(main, min_gap=0.25)
-        await self.shot(main, f"{tag}_sent")
+        # ★2026-09-29（评审"不重发"的边界）：**点下去之后**才是"可能已发出"，
+        # 这里任何异常都不能向外报失败 —— 上层会把"发送前失败"标成可安全重试，
+        # 一旦这里抛出去，同一条消息会被重发一遍。所以收尾动作自己吞异常、照常返回 True，
+        # 真伪交给送达核对（消息记录）去判。
+        try:
+            await self.settle(main, min_gap=0.25)
+            await self.shot(main, f"{tag}_sent")
+        except Exception as exc:  # noqa: BLE001
+            self.last_note = f"点发送后收尾异常（按已发出处理）：{type(exc).__name__}: {exc}"
         self.stats["deliver_ms"] = int((time.time() - t0) * 1000)
         return True, "已点击发送（送达由消息记录核对）"
 
