@@ -1021,7 +1021,24 @@ class MaaSender:
         await self.shot(main, f"{tag}_typed")
 
         # ⑤ 点发送
-        await self.click(main, fx + fw // 2, fy + fh // 2)
+        sx, sy = fx + fw // 2, fy + fh // 2
+        await self.click(main, sx, sy)
+        # ★2026-09-30 真机事故：一条回给主人的消息"已点击发送"，但 WeFlow 原始列表里**根本没有它**
+        #   —— 最可能是"字没打进输入框 → 点了个空输入框"，点下去什么也没发生。
+        #   所以点完发送再花一次 OCR **在聊天区里找这段文字**（排除输入框那一行）：
+        #     · 找到了 → UI 自证送达（读端核对仍是第二道网）；
+        #     · 没找到 → **再点一次发送**（若草稿还留在输入框，这一下就真发出去了；
+        #       若其实已经发出、输入框已清空，再点一次什么也不会发生 —— 不会重复发）。
+        ui_seen = False
+        try:
+            await self.settle(main, min_gap=0.25)
+            ui_seen = await self._sent_visible(main, text, below_y=sy - 20)
+            if not ui_seen:
+                await self.click(main, sx, sy)
+                await self.settle(main, min_gap=0.4)
+                ui_seen = await self._sent_visible(main, text, below_y=sy - 20)
+        except Exception as exc:  # noqa: BLE001 —— 自证失败不影响"已经点过发送"这个事实
+            self.last_note = f"UI 自证异常（按已发出处理）：{type(exc).__name__}: {exc}"
         # ★2026-09-29（评审"不重发"的边界）：**点下去之后**才是"可能已发出"，
         # 这里任何异常都不能向外报失败 —— 上层会把"发送前失败"标成可安全重试，
         # 一旦这里抛出去，同一条消息会被重发一遍。所以收尾动作自己吞异常、照常返回 True，
@@ -1032,7 +1049,32 @@ class MaaSender:
         except Exception as exc:  # noqa: BLE001
             self.last_note = f"点发送后收尾异常（按已发出处理）：{type(exc).__name__}: {exc}"
         self.stats["deliver_ms"] = int((time.time() - t0) * 1000)
-        return True, "已点击发送（送达由消息记录核对）"
+        self.stats["ui_verified"] = self.stats.get("ui_verified", 0) + (1 if ui_seen else 0)
+        return True, ("已点击发送（UI 已在聊天区看到这条）" if ui_seen
+                      else "已点击发送（UI 没在聊天区看到，交给消息记录核对）")
+
+    async def _sent_visible(self, main, text: str, below_y: float | None = None) -> bool:
+        """点完发送后，OCR 右侧聊天区看这条文字到底出没出现（**输入框那一行不算**）。
+
+        只用前几个字做包含判断（长回复 OCR 会被拆行）；找不到就是"没自证"，由调用方再点一次
+        —— 多点一下的代价是零（已经发出的消息不会因为再点发送而重复）。
+        """
+        head = norm(text)[:8]
+        if not head:
+            return True
+        items = await self.ocr(main)
+        w, h = self._win(items)
+        if w < 300:
+            return False
+        for it in items:
+            x, y = it["box"][0], it["box"][1]
+            if x < w * 0.20:
+                continue
+            if below_y is not None and y >= below_y:
+                continue                      # 输入框/发送按钮那一行不算
+            if head and head in norm(it["text"]):
+                return True
+        return False
 
     # ---------- 兼容旧用法 ----------
     async def send(self, contact_name: str, text: str, tag: str = "send") -> tuple[bool, str]:

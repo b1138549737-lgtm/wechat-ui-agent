@@ -274,6 +274,28 @@ def main():
     check("普通名字不受影响（骨架集合为空 → 仍然要求全等）",
           s3._list_rows(win_items([("ABC", [120, 250, 90, 26])]), "ABC群") == [])
 
+    print("[发送后的 UI 自证（2026-09-30 真机：点了发送但消息没进微信）]")
+    import asyncio as _aio  # noqa: PLC0415
+
+    s5 = MaaSender("maa_mcp", None)
+    TXT = "看到了，半亩山 1–3 号休园，最早只有 10/4 能约"
+
+    def _with_ocr(items):
+        async def _ret(_main):
+            return items
+        s5.ocr = _ret
+        return s5
+
+    _with_ocr(win_items([("看到了，半亩山 1–3 号休园", [600, 400, 300, 26])]))
+    check("聊天区里出现这段 → 自证成功",
+          _aio.run(s5._sent_visible(None, TXT, below_y=900)) is True)
+    _with_ocr(win_items([("看到了，半亩山 1–3 号休园", [600, 980, 300, 26])]))
+    check("只有输入框那一行有这段 → **不算**已发送（关键：草稿没发出去）",
+          _aio.run(s5._sent_visible(None, TXT, below_y=900)) is False)
+    _with_ocr(win_items([("完全不相干的一句话", [600, 400, 300, 26])]))
+    check("聊天区里没有这段 → 不自证", _aio.run(s5._sent_visible(None, TXT, below_y=900)) is False)
+    check("空文本 → 直接算自证（免得卡住）", _aio.run(s5._sent_visible(None, "", below_y=900)) is True)
+
     too_short = win_items([("示例机…", [120, 250, 90, 26])], w=1400, h=1000)
     check("配置名和目标名只差一个字时，截断行不会当成它（前缀方向依然拦）",
           s3._list_rows(too_short, "示例机") == [])
