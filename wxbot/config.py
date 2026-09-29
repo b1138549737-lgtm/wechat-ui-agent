@@ -251,6 +251,19 @@ class Config:
         if listed and active_p and not is_local and active_p not in [str(x) for x in listed]:
             out.append(f"当前档位 {active_p} 不在 tools.profiles（{listed}）里 → 它不会自己调工具"
                        f"（联网/提醒/记忆）；想让它调就把 {active_p} 加进这个列表")
+        # ★2026-09-30（评审方向 1 补完：三张表自洽里的"权限/白名单"那一角）：
+        # `commands.sessions` 是按 **name/username 全等**匹配的 —— 写错一个字/多一个空格，
+        # 这个会话就**静默**用不了指令（别人问"为什么这个群不认 /帮助"时最难查）。
+        cmd_sess = [str(x) for x in (self.get("commands.sessions") or []) if str(x).strip()]
+        if cmd_sess:
+            known: set[str] = set()
+            for c in self.contacts():
+                known.add(str(c.get("username") or ""))
+                known.add(str(c.get("name") or ""))
+            dead = [s for s in cmd_sess if s not in known]
+            if dead:
+                out.append(f"commands.sessions 里的 {dead} 不在 contacts 的 name/username 里 → "
+                           f"这条白名单**永远匹配不上**（指令不会在那个会话生效）")
         return out
 
     # 推理模型名单：这些模型不关思考会把 token 全花在 reasoning 上，正文就空了

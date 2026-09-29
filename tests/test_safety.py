@@ -65,6 +65,16 @@ def main():
           _res("某人（非好友）") == [{"displayName": "某人（非好友）", "username": "wxid_x"}])
     check("会话列表里也没有 → 找不到（该报的问题照样报）", _res("不存在的会话") == [])
 
+    print("[指令白名单自洽（2026-09-30，评审方向 1 补完）]")
+    cmdhint = base()
+    cmdhint.data.setdefault("commands", {})["sessions"] = ["文件传输助手", "打错的群名"]
+    check("commands.sessions 里写错的会话名会被点名（否则静默失效）",
+          any("永远匹配不上" in h and "打错的群名" in h for h in cmdhint.hints()))
+    cmdok = base()
+    cmdok.data.setdefault("commands", {})["sessions"] = ["文件传输助手", "filehelper"]
+    check("合法的 name/username 不提示",
+          not any("永远匹配不上" in h for h in cmdok.hints()))
+
     print("[风控体检（2026-09-28 评审：账号行为形态四条）]")
     from wxbot.cli import risk_audit  # noqa: PLC0415
     c = base()
