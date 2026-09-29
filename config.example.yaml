@@ -154,6 +154,8 @@ memory:
   lurk_every_n_messages: 10      # 攒够这么多条没触发的群消息，提炼一次（0 = 关掉）
   instant_signals: true          # 「我喜欢/我不吃/记住…」这类话**立刻**提炼一次，不等每 N 条
   max_injected: 8                # 回复时最多注入几条记忆
+  include_irrelevant: false      # false（默认）= 相关段只放"真的相关"的（至少命中一个词/同类词）；
+                                 # 问"今天几号"这类就不会硬塞一堆无关旧事。true = 退回老行为（按分数取前 N 条）
   summary_enabled: true          # 长对话滚动摘要：聊得久了自动压缩成一段，省 token 也不丢事
   summary_trigger_messages: 6    # 攒够这么多条"没进摘要的旧消息"才压缩一次（省模型调用）
   summary_max_chars: 200

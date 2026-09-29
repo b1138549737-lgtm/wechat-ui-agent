@@ -318,6 +318,18 @@ def main():
     finally:
         wxcli.build_llm = orig_build
 
+    print("[相关段只放真的相关的（2026-09-29 第一轮评审 P2 收尾）]")
+    s9 = tmp_store()
+    s9.add_memory("u1", "不喜欢吃鱼（忌口：鱼）", weight=2.0, speaker="")
+    s9.add_memory("u1", "「孙子」是群外一个人的外号", weight=2.0, speaker="")
+    rel = [m["fact"] for m in s9.rank_memories("u1", "我周五想点个鱼吃", limit=5)]
+    check("相关的照给（同类词也算命中）", rel, ["不喜欢吃鱼（忌口：鱼）"])
+    check("无关查询不再硬塞记忆（生产实测：问'今天几号'塞 3 条无关旧事）",
+          s9.rank_memories("u1", "你能干什么", limit=5), [])
+    check("include_irrelevant=True 可退回老行为",
+          len(s9.rank_memories("u1", "你能干什么", limit=5,
+                               include_irrelevant=True)) >= 1, True)
+
     print(f"\n结果：通过 {len(PASS)}，失败 {len(FAIL)}")
     if FAIL:
         print("失败项：" + "、".join(FAIL))

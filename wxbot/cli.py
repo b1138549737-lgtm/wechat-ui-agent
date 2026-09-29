@@ -1186,7 +1186,9 @@ async def generate_reply(cfg: Config, contact: dict, text: str, profile=None) ->
     # ★ 借鉴 mem0：不只按权重取前 N 条，而是**按跟当前这句话的相关度**排序（2-gram 重合 + 权重 + 新鲜度），
     #   并给每条附上"几天前记的"——否则记忆一多就会出现"答非所问地硬塞旧记忆"。
     ranked = store.rank_memories(contact["username"], text, want_mem,
-                                 speaker=(speaker if is_group and speaker else None)) \
+                                 speaker=(speaker if is_group and speaker else None),
+                                 include_irrelevant=bool(
+                                     cfg.get("memory.include_irrelevant", False))) \
         if cfg.get("memory.enabled", True) else []
     # ★硬约束段（2026-09-27 用户："重要记忆怎么办"）：key_memories 每轮**无条件**带上，
     # 不参与"相关度抽签"。实测原来"忌口：鱼"跟闲聊同分（相关度 0、权重 1.0），并列按时间排，

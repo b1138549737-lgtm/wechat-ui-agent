@@ -43,7 +43,12 @@ KEY_FACT_RE = re.compile(
 # 粗粒度话题类别：用于"同一类话题就算弱相关"（原来纯 2-gram，中文短句几乎全 0）
 CATEGORY_WORDS = {
     "food": ("吃", "喝", "饭", "菜", "点餐", "外卖", "忌口", "过敏", "香菜", "辣", "甜", "酒"),
-    "time": ("几点", "时间", "明天", "后天", "周", "月", "号", "点", "提醒", "约", "日程"),
+    # ★2026-09-29：原来这里是单字 `周/月/号/点` —— "外**号**""一**点**""**月**亮"都会被算成时间类，
+    #   于是问"今天几号"时"「孙子」是…外号"这种记忆也会被弱相关捞进来（生产库实测）。
+    #   换成 2 字以上的形态，既保住"「几点」「几号」「周末」"的召回，也不再误伤同音/同形词。
+    "time": ("几点", "几号", "时间", "日期", "明天", "后天", "昨天", "周末",
+             "周一", "周二", "周三", "周四", "周五", "周六", "周日", "周天",
+             "下个月", "这个月", "月份", "提醒", "约会", "约好", "日程"),
     "name": ("叫", "名字", "称呼", "昵称", "备注"),
     "family": ("老婆", "老公", "孩子", "儿子", "女儿", "爸", "妈", "家人"),
     "place": ("住", "家", "公司", "学校", "城市", "路", "区"),
@@ -580,7 +585,8 @@ class Store:
                 "speaker": r[4] or ""} for r in cur.fetchall()]
 
     def rank_memories(self, username: str, query: str, limit: int = 8,
-                      speaker: str | None = None) -> list[dict]:
+                      speaker: str | None = None,
+                      include_irrelevant: bool = False) -> list[dict]:
         """按"跟这句话有多相关"给记忆排序（借鉴 mem0 的 multi-signal / temporal 思路的轻量版）。
 
         以前注入记忆只按权重取前 N 条 —— 记忆一多就变成"跟当前话题无关的也塞进去"。
@@ -589,6 +595,13 @@ class Store:
           · 权重：被反复提到的记忆（weight）加分
           · 新鲜度：越近记的越优先，并给每条附上"几天前记的"
         群里只取"群共享 + 当前发言人 + 机器人自己的事件"，别人的私人事实照样不进来。
+
+        ★2026-09-29（第一轮评审 P2"无关记忆也注入"的收尾）：**相关段只放真的相关的**——
+        默认要求 `relevance > 0`（至少命中一个 2-gram 或同类别词）。生产库实测：问"今天几号"，
+        score 前三名是"「孙子」是…外号""执行了指令…""到点提醒了…"，全是无关内容
+        （因为 score 里权重 0.3 + 新鲜度 0.5 是"人人都有"的底分）。真正重要的（weight≥2、
+        忌口/称呼这类）走 `key_memories` 的"必带"通道，不受这道过滤影响。
+        想恢复旧行为：`memory.include_irrelevant: true`。
         """
         rows = self.list_memories(username, 200, speaker=speaker)
         q = _bigrams(query)
@@ -608,7 +621,8 @@ class Store:
             m["score"] = rel * 2.0 + min(float(m["weight"] or 1), 3) * 0.3 + fresh * 0.5
             out.append(m)
         out.sort(key=lambda x: (-x["score"], -x["updated_at"]))
-        return out[:limit]
+        picked = out if include_irrelevant else [m for m in out if float(m["relevance"]) > 0]
+        return picked[:limit]
 
     def key_memories(self, username: str, speaker: str | None = None,
                      limit: int = 5, min_weight: float = 2.0) -> list[dict]:
