@@ -134,6 +134,22 @@ $py = ".\.venv\Scripts\python.exe"                  # 后面都用它
 & $py -m wxbot.cli web --port 8765                  # ④ 控制面板：白名单、试跑、日志、暂停都在里面
 ```
 
+## 用 AI 助手帮你装和用（技能包）
+
+仓库自带一个 **AI 助手技能包**：[`skills/wechat-ui-agent`](skills/wechat-ui-agent/SKILL.md)。
+把它复制进你 AI 助手的技能目录（以 [Codex](https://github.com/openai/codex) 为例：`~/.codex/skills/`，
+即 `Copy-Item -Recurse .\skills\wechat-ui-agent "$env:USERPROFILE\.codex\skills\wechat-ui-agent"`），
+然后直接说一句：
+
+> **用 wechat-ui-agent 技能帮我把这个项目装起来 / 看看它为什么不回消息。**
+
+- 装好、配好：AI 会先读 `docs/GUIDE.md` 和 `config.example.yaml` 再动手（不瞎猜配置字段），
+  按 `whoami → ack-risk → doctor` 四步自检带你跑通，并提醒你先 `--dry-run` 试跑。
+- 排查问题：按日志里的原因逐条对（不回消息 / 发不出去 / 读端异常 / 模型报错），
+  细节在技能包自带的 [`references/diagnostics.md`](skills/wechat-ui-agent/references/diagnostics.md)。
+- 技能包自身只是一份 Markdown 说明，**不含可执行代码、不会自己发消息** —— 发消息的开关
+  仍在你手里（`config.yaml` 白名单 / 面板 / `dry_run`）。
+
 ## 三种启动方式
 
 | 方式 | 命令 | 说明 |
@@ -226,6 +242,7 @@ wxbot/                # Python 包：cli / ingest / rules / store / llm / send_m
 tests/                # 24 个离线套件（run_all.py）+ offline/ 事故复现探针
 工具/                  # repair-weflow.ps1（WeFlow 修复）、soak_monitor.py（长跑监控）
 docs/GUIDE.md         # 完整手册
+skills/wechat-ui-agent/  # AI 助手技能包（SKILL.md + 排查手册）
 knowledge/            # 本地知识库目录（放自己的资料，模型可用 lookup_notes 查）
 config.example.yaml   # 配置模板（200+ 行，逐项注释）
 install.ps1           # 一键安装（建 venv / 装依赖 / 生成配置 / 自检）

@@ -1,0 +1,4 @@
+interface:
+  display_name: "wxbot 微信 AI 助理"
+  short_description: "帮你安装、配置、运行和排查本机微信 AI 助理 wxbot"
+  default_prompt: "用 $wechat-ui-agent 帮我把这个项目装起来、跑通自检，并检查还有哪里没配好。"

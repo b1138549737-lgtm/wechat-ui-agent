@@ -51,6 +51,18 @@ $py = ".\.venv\Scripts\python.exe"        # 下面都用它（等价于先激活
 & $py -m wxbot.cli memory 文件传输助手      # 查看长期记忆（--forget ID 删除）
 ```
 
+## 让 AI 助手帮你装和用（技能包）
+
+仓库自带一个 **AI 助手技能包**：`skills/wechat-ui-agent/`（`SKILL.md` + 一份排查手册）。
+把它复制进你 AI 助手的技能目录（以 Codex 为例：`~/.codex/skills/`），之后直接对它说
+**"用 wechat-ui-agent 技能帮我把这个项目装起来 / 看看它为什么不回消息"**。
+
+- 它会让 AI 先读 `docs/GUIDE.md` 与 `config.example.yaml` 再动手（不瞎猜字段），按四步自检带你跑通，
+  出事时按日志原因逐条对（不回消息 / 没发出去 / 读端异常 / 模型报错）。
+- 排查手册在技能包的 `references/diagnostics.md`，也可以当"故障速查表"单独看。
+- 技能包自身只是 Markdown 说明（不含可执行代码、不会自己发消息）；发消息的开关仍在你的
+  `config.yaml` / 面板手里。
+
 ## 配置要点（全部可自定义）
 
 - `llm.profiles.*`：多套模型（`ollama` / `openai` 兼容 / `anthropic`），可设 `active` 与 `fallback` 回退链；
