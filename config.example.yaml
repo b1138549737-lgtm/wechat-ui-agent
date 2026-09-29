@@ -7,6 +7,8 @@ app:
 llm:
   active: local
   fallback: [cloud]           # active 失败时按顺序回退
+  max_context_chars: 0        # 0 = 不设限（默认）；>0 = 超过预算就丢最早的历史
+                              #（丢掉的会被"滚动摘要"兜住；模板里以前漏了这个键，第一轮评审 P2 点名）
   profiles:
     local:
       type: ollama            # ollama | openai | anthropic | gemini
