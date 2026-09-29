@@ -2913,7 +2913,13 @@ async def _run_async(cfg: Config, args) -> int:
             if fb and time.time() - send_fail_cache.get(ck, 0) > 600:
                 send_fail_cache[ck] = time.time()
                 okf, detf = await send_plain(sender, contact, fb)
+                store.add_reply(contact["username"], str(m["content"]), fb, "send_fail", okf,
+                                detf, speaker=sk, source=loop_source)
                 log(f"   {'✅' if okf else '❌'} [send_fail] 已回一句交代：{fb} {detf}")
+                # ★2026-09-29：和下面 LLM 兜底**同一口径** —— 兜底话术真的发出去了 = 这条"回了"
+                # （写进状态与说明，审计/面板都看得见）；兜底也失败才保守记 sent_unverified。
+                status = "replied" if okf else "sent_unverified"
+                detail = f"{detail}／已回兜底话术：{fb}"
         # ★兜底话术（2026-09-27 用户口径："失败必须有交代，静默不回是最严重的体验事故"）：
         # LLM 全档位失败、且重试也用完时，回一句短的，而不是让群里以为它坏了/装没听见。
         # 只在**最后一次**尝试后回，避免"兜底话 + 重试成功的正文"发两条。

@@ -21,7 +21,8 @@ PROBES = HERE / "probes"
 
 QUICK = ["round18_empty_promise_crash.py", "round16_retention.py"]
 ALL = QUICK + ["round5_regressions.py", "round8_drop_matrix.py",
-               "round10_watch.py", "round11_recovery.py"]
+               "round10_watch.py", "round11_recovery.py",
+               "round19_retry_pre_send.py"]
 
 # 每个脚本必须满足的输出断言（"没跑用例"或"退回旧行为"都会在这里露出来）
 EXPECT = {
@@ -31,6 +32,8 @@ EXPECT = {
     "round8_drop_matrix.py": ["重试窗口：该回但错过了"],
     "round10_watch.py": ["合并提示出现 = True"],
     "round11_recovery.py": ["✅ 符合预期"],
+    # 2026-09-29：发送前失败 → 跨轮重试（不双发）+ 兜底话术口径
+    "round19_retry_pre_send.py": ["✅ 符合预期"],
 }
 
 

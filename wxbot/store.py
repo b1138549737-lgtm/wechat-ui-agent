@@ -359,6 +359,10 @@ class Store:
         cur = self.db.execute(
             "UPDATE messages SET status='new' WHERE key=? AND status='failed'", (key,))
         self.db.commit()
+        # ★2026-09-29：这里原来**没有 return** —— 函数声明 `-> bool` 却返回 None，
+        # 于是主循环 `if store.reset_for_retry(...)` 永远为假："↻ 重试" 那行日志从没打印过，
+        # 行内重试也没跑（消息其实是被"待处理 new"那条路兜着重试的，晚一轮、且没有痕迹）。
+        return cur.rowcount > 0
 
     def purge_messages(self, keep_days: int) -> int:
         """删掉"已经处理完"且超过 keep_days 的消息（审查 N18：常驻跑久了 DB 会一直涨）。
