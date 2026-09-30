@@ -25,6 +25,7 @@ from __future__ import annotations
 import hmac
 import http.server
 import json
+import os
 import pathlib
 import secrets
 import shutil
@@ -36,6 +37,10 @@ import yaml
 
 from .runtime import RT
 from .store import Store
+
+# ★2026-10-01（外部证据包 LO-1）：面板请求体上限 —— 以前按 Content-Length 全量读、没有上限，
+# 拿到 token 的人可以用超大 body 顶内存。1MB 对面板所有接口都绰绰有余。
+MAX_BODY_BYTES = 1_000_000
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -98,6 +103,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         if not n:
             return {}
+        if n > MAX_BODY_BYTES:
+            # 太大：不缓冲（守住内存上限），但把已声明的 body 尽量读掉再回 413 ——
+            # 客户端还在发、我们提前关连接的话，对方可能看不到 413 只看到连接被重置。
+            left = min(n, MAX_BODY_BYTES * 4)
+            while left > 0:
+                chunk = self.rfile.read(min(65536, left))
+                if not chunk:
+                    break
+                left -= len(chunk)
+            self._body_too_large = True
+            return {}
         try:
             return json.loads(self.rfile.read(n).decode("utf-8")) or {}
         except Exception:  # noqa: BLE001
@@ -126,10 +142,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             st["window_title"] = str(self.cfg.get("send.window_title", "微信"))
             return self._json(st)
         if url.path == "/api/logs":
-            limit = int((query.get("limit") or ["30"])[0])
+            # ★R2-2：int() 原来在 try 之外，limit=abc 会抛未捕获 ValueError、连接被直接断掉。
+            try:
+                limit = int((query.get("limit") or ["30"])[0])
+            except (TypeError, ValueError):
+                return self._json({"error": "limit 必须是数字"}, 400)
+            limit = max(1, min(limit, 200))
             username = (query.get("username") or [None])[0]
             try:
-                rows = self.store.recent_replies(limit=min(limit, 200), username=username)
+                rows = self.store.recent_replies(limit=limit, username=username)
             except Exception as exc:  # noqa: BLE001
                 return self._json({"error": str(exc)}, 500)
             return self._json({"rows": rows})
@@ -167,7 +188,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json({"error": "unauthorized：写操作需要 X-WXBot-Token"}, 403)
         if not self._content_type_ok():
             return self._json({"error": "只接受 Content-Type: application/json"}, 415)
+        self._body_too_large = False
         body = self._read_body()
+        if self._body_too_large:
+            return self._json({"error": f"请求体过大（上限 {MAX_BODY_BYTES} 字节）"}, 413)
         if url.path == "/api/pause":
             RT.pause(str(body.get("reason") or "面板暂停"))
             return self._json({"ok": True, "paused": True})
@@ -181,7 +205,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             contact = str(body.get("contact") or "").strip()
             if not contact:
                 return self._json({"ok": False, "error": "缺少 contact"}, 400)
-            RT.push_manual(contact, str(body.get("text") or ""), bool(body.get("dry_run")))
+            # ★LO-3：没显式带 dry_run 时**默认试跑**（面板自己会明确传值，不受影响）
+            RT.push_manual(contact, str(body.get("text") or ""),
+                           bool(body.get("dry_run", True)))
             return self._json({"ok": True, "queued": True})
         if url.path == "/api/contacts":
             try:
@@ -270,6 +296,10 @@ def web_token(cfg) -> str:
         fresh = secrets.token_urlsafe(18)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(fresh, encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)     # ★LO-2：POSIX 下收紧权限（Windows 上是 no-op，无害）
+        except OSError:
+            pass
         return fresh
     except Exception:  # noqa: BLE001
         return secrets.token_urlsafe(18)

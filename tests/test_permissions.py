@@ -50,8 +50,19 @@ def main():
     cfg = perms_cfg(admins=["wxid_boss", "小B"])
     contact = {"name": "测试群", "username": GROUP}
     check("本号 → owner", wxcli.role_of(cfg, contact, "wxid_me", "我", True), "owner")
-    check("配置里的 wxid → admin", wxcli.role_of(cfg, contact, "wxid_boss", "", False), "admin")
-    check("配置里的名字 → admin", wxcli.role_of(cfg, contact, "", "小B", False), "admin")
+    check("群里：配置里的 wxid → admin", wxcli.role_of(cfg, contact, "wxid_boss", "", False), "admin")
+    # ★2026-10-01（外部证据包 R3-1）：群昵称是成员自己随便改的 —— 群里只认 wxid：
+    #   ① 按昵称配置的条目在群里不再生效；② 把昵称改成 wxid 字符串也不能提权。
+    check("群里：昵称条目不再给 admin（防改名提权）",
+          wxcli.role_of(cfg, contact, "", "小B", False), "member")
+    check("群里：把昵称改成别人的 wxid 也不给 admin",
+          wxcli.role_of(cfg, contact, "wxid_evil", "wxid_boss", False), "member")
+    check("群里：反查失败（key 退化成昵称）也不认",
+          wxcli.role_of(cfg, contact, "wxid_boss", "wxid_boss", False), "member")
+    private = {"name": "小李", "username": "wxid_li"}
+    check("私聊：昵称条目仍可用", wxcli.role_of(cfg, private, "wxid_li", "小B", False), "admin")
+    check("私聊：wxid 条目仍可用",
+          wxcli.role_of(cfg, private, "wxid_boss", "老板", False), "admin")
     check("群主（读端 isOwner）→ admin",
           wxcli.role_of(cfg, contact, "wxid_owner", "群主", False,
                         lambda c: c == "wxid_owner"), "admin")

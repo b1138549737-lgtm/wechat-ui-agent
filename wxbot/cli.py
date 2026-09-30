@@ -13,6 +13,7 @@ import pathlib
 import queue
 import random
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -38,8 +39,31 @@ from .web_tools import WebTool, available as web_available
 HERE = pathlib.Path(__file__).resolve().parent.parent     # 工程根
 
 
+def _log_safe(msg: str) -> str:
+    """把控制字符转义成可见形式。
+
+    ★2026-10-01（外部证据包 R4-1）：群友的消息内容会拼进日志 —— 不转义时，一条带 \\n
+    的消息能伪造出整行"看起来是系统记录"的日志，ANSI（\\x1b）还能篡改终端显示。
+    日志是审计凭证（长跑统计也靠它），不能让聊天内容改写它。
+    """
+    out = []
+    for ch in str(msg):
+        o = ord(ch)
+        if ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif o < 32 or o == 127:
+            out.append(f"\\x{o:02x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def log(msg: str):
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] {_log_safe(msg)}", flush=True)
 
 
 def msg_key(username: str, m: dict) -> str:
@@ -54,7 +78,29 @@ def msg_key(username: str, m: dict) -> str:
         return f"{username}|{raw_id}"
     import hashlib
     fp = hashlib.md5((m.get("content") or "").encode("utf-8")).hexdigest()[:10]
-    return f"{username}|{int(float(m.get('ts') or 0))}|{fp}"
+    # ★2026-10-01（外部证据包 R2-3）：兜底键原来把时间截到"秒" —— 无 raw_id 的源里，
+    # 同一秒两条**完全相同**的消息会算出同一个键，第二条被当成重复丢掉。改毫秒。
+    return f"{username}|{int(float(m.get('ts') or 0) * 1000)}|{fp}"
+
+
+def sse_event_to_msg(sid: str, ev: dict) -> dict:
+    """把一条 WeFlow SSE 事件归一化成主循环用的消息 dict。
+
+    ★2026-10-01（外部证据包 R2-1）：is_sent 必须沿用 ingest 算好的方向 —— 原来这里硬编码
+    False，机器人自己发出去的消息经 SSE 回读时会被当成"他人消息"，绕过
+    should_reply 的"自己发的消息"过滤（同时入库方向也错）。抽出来也方便单测。
+    """
+    raw_content = ev.get("content") or ""
+    content, kind = clean_content(raw_content)
+    return {"username": sid, "content": content, "raw_content": raw_content,
+            "msg_type": kind, "quote": None,
+            "sender": str(ev.get("sourceName") or ""),
+            "sender_name": str(ev.get("sourceName") or ""),
+            "is_group": str(ev.get("sessionType") or "") == "group"
+                        or str(sid).endswith("@chatroom"),
+            "is_sent": bool(ev.get("is_sent")),
+            "ts": float(ev.get("timestamp") or time.time()),
+            "raw_id": str(ev.get("rawid") or ""), "source": "weflow_sse"}
 
 
 def row_to_msg(row: dict) -> dict:
@@ -152,27 +198,56 @@ def role_of(cfg: Config, contact: dict, sender_key: str, sender_name: str,
     """这个人在这个会话里是什么角色（T380）。
 
     - `owner`：机器人本号（自动认的 wxid）
-    - `admin`：配置里列的管理员（`permissions.admins`，写 wxid 或显示名；会话里可用 `permissions.admins` 覆盖）
+    - `admin`：配置里列的管理员（`permissions.admins`；**群里只认 wxid**，
+      私聊可用 wxid 或显示名；会话里可用 `permissions.admins` 覆盖）
       + 可选"群主也算管理员"（`permissions.group_owner_is_admin`，靠读端的 isOwner 判定）
     - `member`：其他人
+
+    ★2026-10-01（外部证据包 R3-1）：群昵称是**成员自己随便改的**，拿它当身份等于送 admin ——
+    原来的匹配把 sender_name（群昵称）也算进去了：把昵称改成 owners/admins 里写过的名字
+    （甚至 wxid 字符串本身）就能提权。现在群聊只认"wxid 形态的条目 × sender_key"；
+    私聊维持原样（备注/昵称只在私聊里可信）。
     """
     if is_owner:
         return "owner"
     perms = cfg.get("permissions", {}) or {}
     if not perms.get("enabled"):
         return "member"
-    keys = {str(sender_key or "").strip(), str(sender_name or "").strip()}
+    key = str(sender_key or "").strip()
+    name = str(sender_name or "").strip()
+    is_group = str(contact.get("username") or "").endswith("@chatroom")
+    if is_group:
+        keys = {key}
+    else:
+        keys = {key, name}
+
+    def _matched(entries: list[str]) -> bool:
+        for raw in entries:
+            n = str(raw).strip()
+            if not n:
+                continue
+            if is_group:
+                # 群里只信 wxid：昵称条目一律跳过；wxid 条目还要求它 != 显示名 ——
+                # 读端反查失败时 sender_key 会退化成群昵称，这条兜底防"昵称伪装成 wxid"。
+                if not n.lower().startswith("wxid_"):
+                    continue
+                if key == name:
+                    continue
+            if n in keys:
+                return True
+        return False
+
     # 「主人」可以是**本号之外的人**：双号场景里机器人在小号上、你本人在大号上，
     # 这时大号应该照样是 owner（能用 /静音、能让机器人建提醒）。
     owners = [str(x) for x in (perms.get("owners") or []) if str(x).strip()]
     owners += [str(x) for x in ((contact.get("permissions") or {}).get("owners") or [])
                if str(x).strip()]
-    if any(n in keys for n in owners):
+    if _matched(owners):
         return "owner"
     names = [str(x) for x in (perms.get("admins") or []) if str(x).strip()]
     names += [str(x) for x in ((contact.get("permissions") or {}).get("admins") or [])
               if str(x).strip()]
-    if any(n in keys for n in names):
+    if _matched(names):
         return "admin"
     if perms.get("group_owner_is_admin") and sender_key and group_owner_check:
         try:
@@ -1678,6 +1753,16 @@ def cmd_doctor(args):
         log(f"ℹ️ {h}")
     for w in risk_audit(cfg):
         log(f"⚠️ 风控体检: {w}")
+    # ★2026-10-01（外部证据包 R3-1）：群昵称可以随便改 —— 群里配"昵称型"高权限等于提权洞，
+    # 现在群聊只认 wxid；这里把"配了但在群里不会生效"的条目标出来，免得你以为它们还在生效。
+    _perms = cfg.get("permissions", {}) or {}
+    if _perms.get("enabled") and _perms.get("allow_in_groups"):
+        _name_entries = [str(x).strip() for x in
+                         list(_perms.get("owners") or []) + list(_perms.get("admins") or [])
+                         if str(x).strip() and not str(x).strip().lower().startswith("wxid_")]
+        if _name_entries:
+            log(f"⚠️ permissions 里这些条目在群里不生效（群昵称可伪造，群里高权限只认 wxid）："
+                f"{_name_entries} —— 请换成对应 wxid")
     gate = cfg.validate_safety()
     if gate:
         ok_all = False
@@ -1800,6 +1885,26 @@ def cmd_doctor(args):
     except Exception as exc:  # noqa: BLE001
         ok_all = False
         log(f"❌ MaaMCP 启动/连接失败: {exc}")
+
+    # ★2026-10-01（外部证据包 MD-1）：发送层"依赖组合"冒烟 —— mcp 1.x + fastmcp 4.x 的
+    # 坏组合会让 maa_mcp 一启动就 ImportError（以前要等第一次真发消息才发现）。
+    # 这里直接拿发送时用的那个 exe 跑一次 --help。
+    _maa = resolve_maa_exe(cfg)
+    if _maa:
+        try:
+            _p = subprocess.run([_maa, "--help"], capture_output=True, text=True,
+                                encoding="utf-8", errors="ignore", timeout=30)
+            if _p.returncode == 0:
+                log("✅ 发送层依赖可用（maa_mcp 能启动）")
+            else:
+                ok_all = False
+                _lines = ((_p.stderr or "") + (_p.stdout or "")).strip().splitlines()
+                log(f"❌ 发送层依赖异常：maa_mcp 启动失败 —— "
+                    f"{(_lines[-1] if _lines else '')[:120]}")
+                log("   · 多半是依赖组合不兼容（mcp / fastmcp 版本没锁）："
+                    "重跑 install.ps1，或在项目 venv 里 `pip install -r requirements.txt`")
+        except Exception as exc:  # noqa: BLE001 —— 检查本身失败不判死，别影响其它检查
+            log(f"⚠️ 发送层依赖冒烟没跑成（不影响其它检查）: {str(exc)[:80]}")
 
     if args.with_llm:
         try:
@@ -1942,7 +2047,8 @@ def cmd_test_llm(args):
     try:
         text, used = llm.generate("你是测试助手，用一句话回答。", history, args.text or "你好",
                                   args.profile or None, parts, toolbox)
-        log(f"profile={used}\n{text}")
+        log(f"profile={used}")
+        print(text, flush=True)      # 调试命令：模型原文原样打（不经过 log 的净化）
     except LLMError as exc:
         # 调不通也要能把 payload 打出来（例如云端 key 没配——正好想确认它到底会不会带聊天记录）
         log(f"⚠️ 调用没成功（不影响看下面的 payload）: {exc}")
@@ -3282,24 +3388,14 @@ async def _run_async(cfg: Config, args) -> int:
                 if ev.get("_direction_unknown"):
                     log(f"· SSE 事件缺少方向字段（{sid}），交给轮询判定")
                     continue
-                raw_content = ev.get("content") or ""
-                content, kind = clean_content(raw_content)
-                m = {"username": sid, "content": content, "raw_content": raw_content,
-                     "msg_type": kind, "quote": None,
-                     "sender": str(ev.get("sourceName") or ""),
-                     "sender_name": str(ev.get("sourceName") or ""),
-                     "is_group": str(ev.get("sessionType") or "") == "group"
-                                 or sid.endswith("@chatroom"),
-                     "is_sent": False,
-                     "ts": float(ev.get("timestamp") or time.time()),
-                     "raw_id": str(ev.get("rawid") or ""), "source": "weflow_sse"}
+                m = sse_event_to_msg(sid, ev)      # ★R2-1：方向沿用 ingest 算好的 is_sent
                 key = msg_key(sid, m)
                 if store.seen(key):
                     continue
                 sk, sn = await speaker_key(contact, m)      # 先对齐成 wxid，再入库
                 m["sender"], m["sender_name"] = sk, sn
-                store.add_message(key, sid, contact["name"], m["content"], False, m["ts"], ev,
-                                  sender=sk, sender_name=sn)
+                store.add_message(key, sid, contact["name"], m["content"], m["is_sent"],
+                                  m["ts"], ev, sender=sk, sender_name=sn)
                 await handle(contact, m)
 
             # 2) 轮询兜底

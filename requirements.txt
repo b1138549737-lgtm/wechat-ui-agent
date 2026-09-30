@@ -1,8 +1,13 @@
 # 与 pyproject.toml 保持一致：这个是"装完就能跑"的完整列表（含发送层）。
 # 只想要读端/离线测试的话，用 pyproject 的基础依赖即可。
 # ★工单第 6③ 条：给上限 —— 不然某天上游发大版本、行为变了，这里会静默装出新组合。
+# ★2026-10-01（外部证据包 MD-1）：maa-mcp 的传递依赖 fastmcp 也必须**显式锁死** ——
+#   fastmcp 4.x 要 mcp>=2（`mcp.server.request_state`），只锁 `mcp<2` 时会装出
+#   "mcp 1.x + fastmcp 4.x" 的坏组合：maa_mcp 入口一启动就 ImportError，发送层全废。
+#   本机验证过的可用组合：mcp 2.2 + fastmcp 4.0.x + maa-mcp 1.2.3。
 pyyaml>=6.0,<7
-mcp>=1.0,<2
+mcp>=2,<3
+fastmcp>=4,<5
 # 发送层（MaaMCP 自带 MaaFw/opencv；Pillow 用于截图内容校验与画面静止判断）
 maa-mcp>=1.2.3,<2
 pillow>=10.0,<13

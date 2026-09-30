@@ -426,6 +426,18 @@ def main():
     check("正常帧两个指标都高（判好）",
           stats["normal"][0] > 0.02 and stats["normal"][1] > 0.02)
 
+    print("[日志净化（外部证据包 R4-1）：聊天内容不能伪造日志行 / 注入 ANSI]")
+    import contextlib as _cl
+    import io as _io
+    from wxbot.cli import log as _log                      # noqa: PLC0415
+    buf = _io.StringIO()
+    with _cl.redirect_stdout(buf):
+        _log("A" + chr(10) + "B" + chr(27) + "[31m红" + chr(13) + chr(9) + "C")
+    out = buf.getvalue()
+    check("一次 log() 只产生一行（换行被转义，不再伪造日志行）", out.count(chr(10)) == 1)
+    check("ESC/ANSI 不原样透传", chr(27) not in out)
+    check("内容仍可读（A/B/C 都在）", all(c in out for c in "ABC"))
+
     print(f"\n结果：通过 {len(PASS)}，失败 {len(FAIL)}")
     if FAIL:
         print("失败项：" + "、".join(FAIL))

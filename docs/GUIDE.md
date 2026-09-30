@@ -30,7 +30,9 @@ python -m venv .venv
 copy config.example.yaml config.yaml
 ```
 
-> 依赖都有版本上限（`pyyaml<7` / `mcp<2` / `maa-mcp<2` / `pillow<13`）：上游发大版本时不会静默装出没验证过的组合。
+> 依赖都有版本上限（`pyyaml<7` / `mcp 2.x` / `fastmcp 4.x` / `maa-mcp<2` / `pillow<13`）：上游发大版本时不会静默装出没验证过的组合。
+> ★2026-10-01：`fastmcp` 与 `mcp` **必须成对锁** —— 只锁 `mcp<2` 会装出 "mcp 1.x + fastmcp 4.x" 的坏组合，
+> `maa_mcp` 一启动就 ImportError、发送层全废（外部证据包 MD-1 实测）。
 > 联网搜索的可选依赖（`ddgs` / `trafilatura`）默认不装，要用再 `pip install ddgs trafilatura`。
 
 ## 快速开始
@@ -364,6 +366,10 @@ python -m wxbot.cli web --port 8765 --dry-run   # 全程只生成不发送
 token 首次生成后会缓存在
 `data\web_token.txt`（也可以直接在配置里写 `web.token` 固定下来）。另外写接口只接受
 `application/json`、并校验 `Origin`/`Sec-Fetch-Site`，页面里所有微信数据都做了转义。
+★2026-10-01 加固（外部证据包）：写接口请求体上限 1MB（超了回 413，避免超大 body 顶内存）；
+`/api/logs` 参数非法回 400（以前会未捕获异常断连接）；`/api/manual` 不显式带 `dry_run` 时
+**默认试跑**（面板按钮自己会明确传值，不受影响）。**面板 token 等于"代替你发消息"的权限**，
+别外传；token 文件在 POSIX 下会 chmod 0600。
 理由很直接：**面板能替你发消息**，而它的输入是第三方可控的（别人发给你的消息内容）。
 
 面板和常驻循环在**同一个进程**里（共用单实例锁，不会出现两个进程抢微信界面）。能做的事：
@@ -646,6 +652,10 @@ token 首次生成后会缓存在
   提醒到点会把内容发到**创建它的那个会话**（群里发起＝到点在群里提醒），群刷屏由主动发送闸门（15s 间隔 / 每小时 20 条）兜着。
 - **花钱指令对成员有冷却**：`/搜索` `/总结` `/问` 会真跑检索或调模型，成员连刷会把常驻循环拖住 →
   `permissions.member_cooldown_seconds`（默认 10 秒，0 = 不限），冷却期只回一句「刚查过，稍等 N 秒再试～」。
+- ★2026-10-01（外部证据包 R3-1）：**群里只认 wxid** —— 群昵称是成员自己随便改的，拿它当身份
+  等于送 admin（把昵称改成你配置里写过的名字、甚至 wxid 字符串就能提权）。现在群聊只匹配
+  `wxid_` 形态的条目 × 消息发送者的 wxid；显示名/备注只在**私聊**里生效。配了昵称型高权限时
+  `doctor` 会告警提醒换成 wxid。
 - 会话允许范围：自聊会话 + `commands.sessions` 里列的 + （`permissions.allow_in_groups` 打开时）**被监听的群**；好友私聊里打指令仍然一律不执行（防止把 `/记忆` 发给对方）。
 - 关掉分级：`permissions.enabled: false` → 回到"只有主人能用指令"的老行为。
 
@@ -655,7 +665,7 @@ permissions:
   enabled: true
   allow_in_groups: true        # 群里也能用指令（角色不够的按普通消息处理）
   group_owner_is_admin: true   # 群主自动算管理员
-  admins: [wxid_abc, 小A]      # 额外管理员（wxid 或显示名/群昵称）
+  admins: [wxid_abc]           # 额外管理员：群里只认 wxid（显示名只在私聊生效）
 contacts:
 - name: 某个群
   username: 123@chatroom

@@ -241,6 +241,25 @@ def main():
                            cwd=root).stdout.strip() for _ in range(2)]
     check("两个独立进程算出的键一致", bool(outs[0]) and outs[0] == outs[1], True)
     check("键里带内容指纹（不是 username|| 这种退化形式）", outs[0].count("|"), 2)
+    # ★2026-10-01（外部证据包 R2-3）：兜底键原来只到"秒" —— 无 raw_id 的源里，
+    # 同一秒两条**完全相同**的消息会算出同一个键，第二条被当重复丢掉。改毫秒。
+    from wxbot.cli import msg_key, sse_event_to_msg       # noqa: PLC0415
+    k1 = msg_key("u", {"content": "哈哈哈", "ts": 1000.0, "raw_id": ""})
+    k2 = msg_key("u", {"content": "哈哈哈", "ts": 1000.9, "raw_id": ""})
+    check("同秒两条相同消息不再碰撞（毫秒键）", k1 == k2, False)
+    check("带 raw_id 时仍优先用 raw_id",
+          msg_key("u", {"content": "x", "ts": 1.0, "raw_id": "42"}).endswith("|42"), True)
+
+    print("[SSE 方向（外部证据包 R2-1）：ingest 算好的 is_sent 不能被重建丢掉]")
+    e1 = sse_event_to_msg("g@chatroom", {"content": "自己的回声", "is_sent": True,
+                                         "timestamp": 1000.0, "rawid": "9",
+                                         "sourceName": "机器人"})
+    check("自己发出的 SSE 事件 is_sent=True", e1["is_sent"], True)
+    e2 = sse_event_to_msg("g@chatroom", {"content": "别人的话", "is_sent": False,
+                                         "timestamp": 1000.0})
+    check("别人发的 SSE 事件 is_sent=False", e2["is_sent"], False)
+    check("SSE 重建保留 raw_id / 内容 / 时间戳",
+          (e1["raw_id"], e1["content"], e1["ts"]), ("9", "自己的回声", 1000.0))
 
     print("[超时只放弃等待、不取消任务（审查 N2）]")
     class SlowOnceSender(FakeSender):

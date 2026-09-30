@@ -134,9 +134,11 @@ permissions:
   group_owner_is_admin: true     # 群主自动算管理员（靠读端的 isOwner 判定）
   member_cooldown_seconds: 10    # 普通成员用 /搜索 /总结 /问 这类"花钱指令"的冷却秒数（0 = 不限）
   owners: []                     # **本号之外的"主人"**：写 wxid 或显示名/备注。
+                                 # ★2026-10-01：**群里只认 wxid**（群昵称谁都能改，按昵称就给高权限=提权洞）；
+                                 #   显示名/备注只在私聊里匹配。群里要用就填 wxid。例：[wxid_abc]
                                  # 双号场景（机器人在小号、你本人是大号）必须填，否则你只是普通成员：
-                                 # 不能 /静音、不能让机器人建提醒。例：[wxid_abc, 主人]
-  admins: []                     # 额外管理员：wxid 或显示名（如 [wxid_abc, 小A]）
+                                 # 不能 /静音、不能让机器人建提醒。
+  admins: []                     # 额外管理员：wxid（群里只认这个）或显示名（仅私聊生效）
                                  # 单个会话单独指定：在那个 contact 下写 permissions: {owners: [...], admins: [...]}
 
 audit:

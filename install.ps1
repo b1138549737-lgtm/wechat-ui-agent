@@ -85,7 +85,9 @@ if (-not $pipUp.HasExited) {
     Write-Host "   · pip 自身升级超时 → 跳过（不影响后续安装）" -ForegroundColor DarkGray
 }
 # ★工单第 6③ 条：和 requirements.txt/pyproject.toml 同一套上限 —— 上游大版本别静默装上
-$deps = @('pyyaml>=6.0,<7', 'mcp>=1.0,<2', 'maa-mcp>=1.2.3,<2', 'pillow>=10.0,<13')
+# ★2026-10-01（外部证据包 MD-1）：fastmcp 与 mcp 必须成对锁死 —— 只锁 mcp<2 会装出
+#   "mcp 1.x + fastmcp 4.x" 的坏组合，maa_mcp 一启动就 ImportError（发送层全废）。
+$deps = @('pyyaml>=6.0,<7', 'mcp>=2,<3', 'fastmcp>=4,<5', 'maa-mcp>=1.2.3,<2', 'pillow>=10.0,<13')
 # 默认源 + 清华镜像重试（国内直连 pypi.org 经常卡住，实测会一直停在第 2 步不动）
 $indexes = @(
     @{ name = '默认源'; args = @() },

@@ -9,11 +9,14 @@ description = "微信 AI 自动回复（读端走 WeFlow/MCP，发端走 MaaMCP 
 requires-python = ">=3.10"          # 代码使用 X | None 语法
 dependencies = [
   "pyyaml>=6.0,<7",
-  "mcp>=1.0,<2",
+  # ★2026-10-01（外部证据包 MD-1）：上限放宽到 <3 —— 发送层的 send extra 需要 mcp>=2
+  # （fastmcp 4 的传递依赖），基础只读安装仍然允许 1.x。
+  "mcp>=1.0,<3",
 ]
 
 [project.optional-dependencies]
-send = ["maa-mcp>=1.2.3,<2", "pillow>=10.0,<13"]
+# ★MD-1：显式锁死 fastmcp / mcp 的组合，别再让 pip 装出 "mcp 1.x + fastmcp 4.x" 的坏组合。
+send = ["maa-mcp>=1.2.3,<2", "fastmcp>=4,<5", "mcp>=2,<3", "pillow>=10.0,<13"]
 
 [project.scripts]
 wxbot = "wxbot.cli:main"

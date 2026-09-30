@@ -90,6 +90,21 @@ def main():
                                            "X-WXBot-Token": TOKEN})
     check("恢复也生效", RT.paused, False)
 
+    print("[面板加固（外部证据包 R2-2 / LO-1 / LO-3）]")
+    code, text = req(f"{base}/api/logs?limit=abc", headers={"X-WXBot-Token": TOKEN})
+    check("limit=abc → 400（原来未捕获异常、直接断连接）", code, 400)
+    code, text = req(f"{base}/api/logs?limit=99999", headers={"X-WXBot-Token": TOKEN})
+    check("limit 超过 200 被夹住、接口仍正常", code, 200)
+    big = {"reason": "A" * 1_100_000}
+    code, text = req(f"{base}/api/pause", "POST", big,
+                     {"Content-Type": "application/json", "X-WXBot-Token": TOKEN})
+    check("1.1MB 请求体 → 413（超上限）", code, 413)
+    check("被拒的大 body 没有改状态", RT.paused, False)
+    RT.push_manual("文件传输助手", "回归用（只入队，不消费）")
+    _queued = RT.take_manual()
+    check("push_manual 默认 dry_run=True（不显式说才真发）",
+          bool(_queued) and _queued[0]["dry_run"], True)
+
     print("[XSS：页面不许把微信数据直接拼进 innerHTML]")
     check("页面里定义了转义函数 esc", "const esc=" in PAGE, True)
     check("请求内容插值都走 cut()/esc()", "${(r.request||'').slice" in PAGE, False)

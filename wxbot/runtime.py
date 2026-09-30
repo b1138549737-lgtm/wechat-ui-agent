@@ -53,7 +53,9 @@ class Runtime:
         with self._lock:
             self.stop_requested = True
 
-    def push_manual(self, contact: str, text: str, dry_run: bool = False):
+    # ★2026-10-01（外部证据包 LO-3）：默认值给 True（试跑）—— 调用方必须**显式**说
+    # dry_run=False 才会真发。面板自己传值，不受影响。
+    def push_manual(self, contact: str, text: str, dry_run: bool = True):
         with self._lock:
             self.manual.append({"contact": contact, "text": text, "dry_run": dry_run})
 
