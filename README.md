@@ -7,6 +7,8 @@
 ![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![tests](https://img.shields.io/badge/tests-24%20suites%20%2F%20970%2B%20asserts-brightgreen?style=flat-square)
 
+> **在线介绍页**：https://b1138549737-lgtm.github.io/wechat-ui-agent/
+
 > 仓库名 `wechat-ui-agent`；Python 包名与命令行都是 `wxbot`。
 
 > ⚠️ **用途与免责声明（先读这一段）**
